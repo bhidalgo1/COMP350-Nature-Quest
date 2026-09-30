@@ -5,3 +5,4 @@ Group Members: Zack Clark
 Johny Parra
 Bien Panganiban
 Gerardo Ramirez
+Brooklyn Hidalgo
