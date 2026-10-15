@@ -1,0 +1,8 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Base.Theme.InteractiveMap" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/channel_blue</item>
+        <item name="colorSecondary">@color/islands_teal</item>
+        <item name="colorOnPrimary">@color/white</item>
+    </style>
+</resources>
