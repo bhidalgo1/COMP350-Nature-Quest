@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.*
 import com.example.naturequesthomescreen.HomeScreen
 
 class MainActivity : ComponentActivity() {
@@ -13,16 +14,24 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MaterialTheme {
-                HomeScreen(
-                    onCameraClick = {
-                        Toast.makeText(this, "Camera button clicked", Toast.LENGTH_SHORT).show()
-                    },
-                    onMapClick = {
-                        Toast.makeText(this, "Map button clicked", Toast.LENGTH_SHORT).show()
-                    },
-                    onUploadClick = {Toast.makeText(this, "Upload button clicked", Toast.LENGTH_SHORT).show()
-                    }
-                )
+                var showCamera by remember { mutableStateOf(false) }//variable to hold camera screen state.
+                if (showCamera) {
+                    CameraScreen(
+                        onBack = { showCamera = false }
+                    )
+                } else {
+                    HomeScreen(
+                        onCameraClick = {
+                            showCamera = true
+                        },
+                        onMapClick = {
+                            Toast.makeText(this, "Map button clicked", Toast.LENGTH_SHORT).show()
+                        },
+                        onUploadClick = {
+                            Toast.makeText(this, "Upload button clicked", Toast.LENGTH_SHORT).show()
+                        }
+                    )
+                }
             }
         }
     }
