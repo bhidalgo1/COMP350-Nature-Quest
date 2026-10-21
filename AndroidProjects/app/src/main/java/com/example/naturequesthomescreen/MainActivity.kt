@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
+import android.content.Intent
 import com.example.naturequesthomescreen.HomeScreen
 
 class MainActivity : ComponentActivity() {
@@ -28,7 +29,9 @@ class MainActivity : ComponentActivity() {
                             Toast.makeText(this, "Map button clicked", Toast.LENGTH_SHORT).show()
                         },
                         onUploadClick = {
-                            Toast.makeText(this, "Upload button clicked", Toast.LENGTH_SHORT).show()
+                            startActivity(
+                              Intent(this@MainActivity, PhotoUploadActivity::class.java)
+                            )
                         }
                     )
                 }
