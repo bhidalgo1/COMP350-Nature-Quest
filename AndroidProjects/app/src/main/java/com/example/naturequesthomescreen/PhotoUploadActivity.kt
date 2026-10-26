@@ -78,13 +78,12 @@ class PhotoUploadActivity : ComponentActivity() {
                         ) {
                             OutlinedButton(onClick = { page = "post" }) { Text("Post") }
                             OutlinedButton(onClick = { page = "feed" }) { Text("Feed") }
-                            OutlinedButton(onClick = { page = "upload" }) { Text("Upload Only") }
                         }
                         Box(modifier = Modifier.weight(1f)) {
                             when (page) {
                                 "post" -> PhotoPostScreen(onPosted = { page = "feed" })
                                 "feed" -> PhotoFeedScreen()
-                                else -> FirebasePhotoScreen()
+                                else -> PhotoPostScreen(onPosted = { page = "feed" })
                             }
                         }
                     }
