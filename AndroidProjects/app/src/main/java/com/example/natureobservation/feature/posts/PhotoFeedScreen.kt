@@ -88,6 +88,7 @@ fun PhotoFeedScreen() {
                         Text(post.title, style = MaterialTheme.typography.titleMedium)
                         if (post.description.isNotBlank()) Text(post.description)
                         Text("Posted by ${post.authorId.take(8)}", style = MaterialTheme.typography.labelSmall)
+                        PostInteractions(postId = post.id)
                     }
                 }
             }
