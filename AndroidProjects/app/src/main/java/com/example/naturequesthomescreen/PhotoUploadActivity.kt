@@ -76,6 +76,7 @@ class PhotoUploadActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxWidth().padding(8.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            OutlinedButton(onClick = { finish() }) { Text("← Home") }
                             OutlinedButton(onClick = { page = "post" }) { Text("Post") }
                             OutlinedButton(onClick = { page = "feed" }) { Text("Feed") }
                             OutlinedButton(onClick = { page = "upload" }) { Text("Upload Only") }
