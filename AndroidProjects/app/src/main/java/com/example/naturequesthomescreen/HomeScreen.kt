@@ -72,10 +72,7 @@ fun HomeScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "View campus map, drop custom pins with titles & descriptions, and explore saved locations.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+
                     Button(
                         onClick = onMapClick,
                         modifier = Modifier.fillMaxWidth()
@@ -99,10 +96,7 @@ fun HomeScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "Snap photos directly in Nature Quest to record your wildlife and plant observations.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+
                     Button(
                         onClick = onCameraClick,
                         modifier = Modifier.fillMaxWidth()
@@ -126,10 +120,7 @@ fun HomeScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = "Share photo observations to the community feed or upload photos to Firebase storage.",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    
                     Button(
                         onClick = onUploadClick,
                         modifier = Modifier.fillMaxWidth()

@@ -33,6 +33,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var placeDetail: TextView
     private lateinit var pinPhoto: ImageView
     private var photoLoadJob: Job? = null
+    private var requestedPinFocused = false
     private var mapFeedListener: ListenerRegistration? = null
 
     private val userMarkers = mutableListOf<Marker>()
@@ -160,6 +161,8 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
                         }
                     }
                 }
+
+                focusRequestedPin()
             },
             onError = { error ->
                 Toast.makeText(
@@ -305,7 +308,27 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
             }
         }
     }
+    private fun focusRequestedPin() {
+        if (requestedPinFocused) return
 
+        val pinId = intent.getStringExtra("pin_id") ?: return
+
+        val marker = userMarkers.firstOrNull {
+            (it.tag as? ObservationPost)?.id == pinId
+        } ?: return
+
+        requestedPinFocused = true
+
+        googleMap.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(
+                marker.position,
+                18f
+            )
+        )
+
+        marker.showInfoWindow()
+        showPin(marker)
+    }
     override fun onDestroy() {
         mapFeedListener?.remove()
         photoLoadJob?.cancel()

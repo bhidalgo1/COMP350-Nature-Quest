@@ -2,6 +2,9 @@ package com.example.natureobservation.feature.posts
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import android.content.Intent
+import androidx.compose.foundation.clickable
+import com.example.naturequesthomescreen.MapActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -85,7 +88,17 @@ fun PhotoFeedScreen() {
                             Surface(
                                 color = MaterialTheme.colorScheme.primaryContainer,
                                 shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        enabled = post.latitude != null &&
+                                                post.longitude != null
+                                    ) {
+                                        context.startActivity(
+                                            Intent(context, MapActivity::class.java)
+                                                .putExtra("pin_id", post.id)
+                                        )
+                                    }
                             ) {
                                 Row(
                                     modifier = Modifier.padding(8.dp),
