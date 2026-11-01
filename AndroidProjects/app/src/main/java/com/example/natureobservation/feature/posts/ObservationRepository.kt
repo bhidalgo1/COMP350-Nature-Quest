@@ -1,9 +1,11 @@
 package com.example.natureobservation.feature.posts
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import com.google.firebase.FirebaseApp
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
@@ -26,12 +28,73 @@ class ObservationRepository(context: Context) {
     private val db: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
     private val storage: FirebaseStorage by lazy { FirebaseStorage.getInstance() }
 
+    companion object {
+        private val localPosts = mutableListOf<ObservationPost>()
+        private val feedListeners = mutableListOf<() -> Unit>()
+
+        fun addLocalPost(post: ObservationPost) {
+            synchronized(localPosts) {
+                localPosts.removeAll { it.id == post.id }
+                localPosts.add(0, post)
+            }
+            feedListeners.toList().forEach { it.invoke() }
+        }
+
+        fun getLocalPosts(): List<ObservationPost> {
+            return synchronized(localPosts) { localPosts.toList() }
+        }
+    }
+
     suspend fun ensureSignedIn(): String {
         check(FirebaseApp.initializeApp(appContext) != null) {
             "Firebase is not configured. Add the matching google-services.json to app/."
         }
         return auth.currentUser?.uid ?: auth.signInAnonymously().await().user?.uid
             ?: error("Anonymous Firebase Authentication is not enabled.")
+    }
+
+    /** Publish a custom Map Pin observation. */
+    suspend fun publishPin(
+        title: String,
+        description: String,
+        latitude: Double,
+        longitude: Double
+    ): String {
+        val cleanTitle = title.trim().ifBlank { "Map Pin Observation" }
+        val cleanDescription = description.trim()
+        val uid = try { ensureSignedIn() } catch (_: Exception) { "user_${UUID.randomUUID().toString().take(8)}" }
+        val postId = UUID.randomUUID().toString()
+
+        val post = ObservationPost(
+            id = postId,
+            authorId = uid,
+            title = cleanTitle,
+            description = cleanDescription,
+            storagePath = "",
+            createdAt = Timestamp.now(),
+            latitude = latitude,
+            longitude = longitude,
+            isMapPin = true
+        )
+
+        addLocalPost(post)
+
+        try {
+            val record = mapOf(
+                "authorId" to uid,
+                "title" to cleanTitle,
+                "description" to cleanDescription,
+                "storagePath" to "",
+                "latitude" to latitude,
+                "longitude" to longitude,
+                "isMapPin" to true,
+                "createdAt" to FieldValue.serverTimestamp()
+            )
+            db.collection("observations").document(postId).set(record).await()
+        } catch (_: Exception) {
+            // Firestore write optional if offline
+        }
+        return postId
     }
 
     /** Upload first; only create a visible Firestore post when upload succeeds. */
@@ -101,31 +164,73 @@ class ObservationRepository(context: Context) {
     fun observeFeed(
         onUpdate: (List<ObservationPost>) -> Unit,
         onError: (Exception) -> Unit
-    ): ListenerRegistration = db.collection("observations")
-        .orderBy("createdAt", Query.Direction.DESCENDING)
-        .limit(40)
-        .addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                onError(error)
-            } else if (snapshot != null) {
-                onUpdate(snapshot.documents.mapNotNull { document ->
-                    val author = document.getString("authorId") ?: return@mapNotNull null
-                    val title = document.getString("title") ?: return@mapNotNull null
-                    val path = document.getString("storagePath") ?: return@mapNotNull null
-                    ObservationPost(
-                        id = document.id,
-                        authorId = author,
-                        title = title,
-                        description = document.getString("description").orEmpty(),
-                        storagePath = path,
-                        createdAt = document.getTimestamp("createdAt")
-                    )
-                })
-            }
+    ): ListenerRegistration {
+        var lastRemotePosts = emptyList<ObservationPost>()
+
+        fun emitCombined() {
+            val local = getLocalPosts()
+            val combined = (local + lastRemotePosts)
+                .distinctBy { it.id }
+                .sortedByDescending { it.createdAt?.seconds ?: Long.MAX_VALUE }
+            onUpdate(combined)
         }
 
+        val listener = {
+            emitCombined()
+        }
+        synchronized(localPosts) {
+            feedListeners.add(listener)
+        }
+
+        emitCombined()
+
+        val firestoreRegistration = try {
+            db.collection("observations")
+                .orderBy("createdAt", Query.Direction.DESCENDING)
+                .limit(40)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        onError(error)
+                        emitCombined()
+                    } else if (snapshot != null) {
+                        lastRemotePosts = snapshot.documents.mapNotNull { document ->
+                            val author = document.getString("authorId") ?: return@mapNotNull null
+                            val title = document.getString("title") ?: return@mapNotNull null
+                            val lat = document.getDouble("latitude")
+                            val lng = document.getDouble("longitude")
+                            val isPin = document.getBoolean("isMapPin") ?: (lat != null && lng != null)
+                            ObservationPost(
+                                id = document.id,
+                                authorId = author,
+                                title = title,
+                                description = document.getString("description").orEmpty(),
+                                storagePath = document.getString("storagePath").orEmpty(),
+                                createdAt = document.getTimestamp("createdAt"),
+                                latitude = lat,
+                                longitude = lng,
+                                isMapPin = isPin
+                            )
+                        }
+                        emitCombined()
+                    }
+                }
+        } catch (_: Exception) {
+            null
+        }
+
+        return object : ListenerRegistration {
+            override fun remove() {
+                firestoreRegistration?.remove()
+                synchronized(localPosts) {
+                    feedListeners.remove(listener)
+                }
+            }
+        }
+    }
+
     /** Storage SDK enforces authenticated reads; temp files are deleted after decoding. */
-    suspend fun loadPreview(storagePath: String): android.graphics.Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun loadPreview(storagePath: String): Bitmap? = withContext(Dispatchers.IO) {
+        if (storagePath.isBlank()) return@withContext null
         val temp = File.createTempFile("observation_", ".img", appContext.cacheDir)
         try {
             storage.reference.child(storagePath).getFile(temp).await()
@@ -137,6 +242,8 @@ class ObservationRepository(context: Context) {
                 temp.absolutePath,
                 android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
             )
+        } catch (_: Exception) {
+            null
         } finally {
             temp.delete()
         }

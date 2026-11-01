@@ -3,14 +3,18 @@ package com.example.natureobservation.feature.posts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -20,12 +24,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.launch
+import java.util.Locale
 
 /** Live Firestore feed. The host app can display this anywhere in its navigation. */
 @Composable
@@ -74,19 +81,57 @@ fun PhotoFeedScreen() {
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        val photo by rememberRemotePhotoBitmap(repository, post.storagePath)
-                        if (photo != null) {
-                            Image(
-                                bitmap = photo!!,
-                                contentDescription = "Photo for ${post.title}",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxWidth().height(200.dp)
-                            )
-                        } else {
-                            Text("Loading photo...", style = MaterialTheme.typography.bodySmall)
+                        if (post.isMapPin || post.latitude != null) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "📍 Map Pin Observation",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    if (post.latitude != null && post.longitude != null) {
+                                        Text(
+                                            text = String.format(
+                                                Locale.US,
+                                                "%.4f, %.4f",
+                                                post.latitude,
+                                                post.longitude
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        Text(post.title, style = MaterialTheme.typography.titleMedium)
-                        if (post.description.isNotBlank()) Text(post.description)
+
+                        if (post.storagePath.isNotBlank()) {
+                            val photo by rememberRemotePhotoBitmap(repository, post.storagePath)
+                            if (photo != null) {
+                                Image(
+                                    bitmap = photo!!,
+                                    contentDescription = "Photo for ${post.title}",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxWidth().height(200.dp)
+                                )
+                            } else {
+                                Text("Loading photo...", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+
+                        Text(post.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (post.description.isNotBlank()) {
+                            Text(post.description, style = MaterialTheme.typography.bodyMedium)
+                        }
                         Text("Posted by ${post.authorId.take(8)}", style = MaterialTheme.typography.labelSmall)
                         PostInteractions(postId = post.id)
                     }

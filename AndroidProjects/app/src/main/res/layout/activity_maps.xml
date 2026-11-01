@@ -43,7 +43,13 @@
             android:id="@+id/resetButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Reset Map" />
+            android:text="Recenter Map" />
+
+        <Button
+            android:id="@+id/backToHomeButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Back to Home Screen" />
 
     </LinearLayout>
 
