@@ -102,6 +102,7 @@ class ObservationRepository(context: Context) {
         imageUri: Uri,
         title: String,
         description: String,
+        pinId: String? = null,
         onProgress: (Float) -> Unit
     ): String {
         val cleanTitle = title.trim()
@@ -118,7 +119,8 @@ class ObservationRepository(context: Context) {
         val (photo, mimeType) = copySelectedImage(imageUri)
         val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
             ?.takeIf { it.matches(Regex("[a-zA-Z0-9]{1,8}")) } ?: "jpg"
-        val storagePath = "observation_photos/$uid/$postId.$ext"
+        val photoId = UUID.randomUUID().toString()
+        val storagePath = "observation_photos/$uid/$photoId.$ext"
         val photoRef = storage.reference.child(storagePath)
         var uploaded = false
         try {
@@ -142,15 +144,73 @@ class ObservationRepository(context: Context) {
                 task.removeOnProgressListener(progressListener)
             }
 
-            val record = mapOf(
-                "authorId" to uid,
-                "title" to cleanTitle,
-                "description" to cleanDescription,
-                "storagePath" to storagePath,
-                "createdAt" to FieldValue.serverTimestamp()
-            )
-            db.collection("observations").document(postId).set(record).await()
-            return postId
+            if (pinId == null) {
+                val record = mapOf(
+                    "authorId" to uid,
+                    "title" to cleanTitle,
+                    "description" to cleanDescription,
+                    "storagePath" to storagePath,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+
+                db.collection("observations")
+                    .document(postId)
+                    .set(record)
+                    .await()
+
+                return postId
+            }
+
+            require(pinId.isNotBlank()) {
+                "Choose a map pin."
+            }
+
+            val pinRef = db.collection("observations").document(pinId)
+
+            db.runTransaction { transaction ->
+                val pin = transaction.get(pinRef)
+
+                check(pin.exists()) {
+                    "This pin no longer exists."
+                }
+
+                check(pin.getString("authorId") == uid) {
+                    "Choose one of your own pins."
+                }
+
+                check(
+                    pin.getDouble("latitude") != null &&
+                            pin.getDouble("longitude") != null
+                ) {
+                    "This observation does not have a map location."
+                }
+
+                check(pin.getString("storagePath").isNullOrBlank()) {
+                    "This pin already has a photo."
+                }
+
+                transaction.update(
+                    pinRef,
+                    mapOf(
+                        "title" to cleanTitle,
+                        "description" to cleanDescription,
+                        "storagePath" to storagePath
+                    )
+                )
+            }.await()
+
+// Update the local pin too, so it shows the attached photo.
+            getLocalPosts().firstOrNull { it.id == pinId }?.let { pin ->
+                addLocalPost(
+                    pin.copy(
+                        title = cleanTitle,
+                        description = cleanDescription,
+                        storagePath = storagePath
+                    )
+                )
+            }
+
+            return pinId
         } catch (error: Exception) {
             // Avoid leaving an unreferenced picture if the Firestore write fails.
             if (uploaded) try { photoRef.delete().await() } catch (_: Exception) { }

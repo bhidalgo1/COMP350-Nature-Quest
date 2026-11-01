@@ -6,6 +6,12 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.ImageView
+import android.view.View
+import com.example.natureobservation.feature.posts.ObservationPost
+import kotlinx.coroutines.ensureActive
+import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.Job
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -25,6 +31,9 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var googleMap: GoogleMap
     private lateinit var placeTitle: TextView
     private lateinit var placeDetail: TextView
+    private lateinit var pinPhoto: ImageView
+    private var photoLoadJob: Job? = null
+    private var mapFeedListener: ListenerRegistration? = null
 
     private val userMarkers = mutableListOf<Marker>()
     private val repository by lazy { ObservationRepository(this) }
@@ -38,6 +47,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
         placeTitle = findViewById(R.id.placeTitle)
         placeDetail = findViewById(R.id.placeDetail)
+        pinPhoto = findViewById(R.id.pinPhoto)
 
         val mapFragment = supportFragmentManager
             .findFragmentById(R.id.map) as SupportMapFragment
@@ -115,36 +125,57 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         )
 
         // Sync feed items to map
-        repository.observeFeed(
+        mapFeedListener = repository.observeFeed(
             onUpdate = { posts ->
                 posts.forEach { post ->
                     val lat = post.latitude
                     val lng = post.longitude
+
                     if (lat != null && lng != null) {
-                        val pos = LatLng(lat, lng)
-                        val exists = userMarkers.any {
-                            it.position.latitude == lat && it.position.longitude == lng
+                        val existingMarker = userMarkers.firstOrNull {
+                            (it.tag as? ObservationPost)?.id == post.id
+                        } ?: userMarkers.firstOrNull {
+                            it.tag == null &&
+                                    it.position.latitude == lat &&
+                                    it.position.longitude == lng
                         }
-                        if (!exists) {
+
+                        if (existingMarker != null) {
+                            existingMarker.tag = post
+                            existingMarker.title = post.title
+                            existingMarker.snippet = post.description
+                        } else {
                             val marker = googleMap.addMarker(
                                 MarkerOptions()
-                                    .position(pos)
+                                    .position(LatLng(lat, lng))
                                     .title(post.title)
                                     .snippet(post.description)
                                     .draggable(true)
                             )
+
                             if (marker != null) {
+                                marker.tag = post
                                 userMarkers.add(marker)
                             }
                         }
                     }
                 }
             },
-            onError = {}
+            onError = { error ->
+                Toast.makeText(
+                    this@MapActivity,
+                    error.localizedMessage ?: "Could not load map pins.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         )
     }
 
     private fun showCampus() {
+        photoLoadJob?.cancel()
+        pinPhoto.setImageDrawable(null)
+        pinPhoto.visibility = View.GONE
+
         placeTitle.text = "CSU Channel Islands"
         placeDetail.text = "Tap map or 'Add Pin Here' to create a pin."
     }
@@ -229,6 +260,10 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun showPin(marker: Marker) {
+        photoLoadJob?.cancel()
+        pinPhoto.setImageDrawable(null)
+        pinPhoto.visibility = View.GONE
+
         placeTitle.text = marker.title ?: "User Pin"
 
         val descriptionText = marker.snippet
@@ -244,5 +279,36 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         } else {
             locationText
         }
+
+        val post = marker.tag as? ObservationPost ?: return
+
+        if (post.storagePath.isBlank()) {
+            return
+        }
+
+        photoLoadJob = lifecycleScope.launch {
+            val bitmap = repository.loadPreview(post.storagePath)
+
+            // Ignore a previous photo request if another pin was selected.
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+
+            if (bitmap != null) {
+                pinPhoto.setImageBitmap(bitmap)
+                pinPhoto.contentDescription = "Photo for ${post.title}"
+                pinPhoto.visibility = View.VISIBLE
+            } else {
+                Toast.makeText(
+                    this@MapActivity,
+                    "Could not load this pin's photo. Tap the pin to retry.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        mapFeedListener?.remove()
+        photoLoadJob?.cancel()
+        super.onDestroy()
     }
 }
