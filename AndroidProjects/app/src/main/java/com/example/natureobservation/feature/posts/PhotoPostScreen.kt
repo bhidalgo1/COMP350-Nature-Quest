@@ -5,6 +5,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.runtime.DisposableEffect
+import com.google.firebase.firestore.ListenerRegistration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,6 +46,49 @@ fun PhotoPostScreen(onPosted: (String) -> Unit = {}) {
     var sending by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     var message by remember { mutableStateOf("Choose a nature photo to start a post.") }
+    var availablePins by remember {
+        mutableStateOf<List<ObservationPost>>(emptyList())
+    }
+    var selectedPinId by remember { mutableStateOf<String?>(null) }
+    var loadingPins by remember { mutableStateOf(true) }
+
+    DisposableEffect(repository) {
+        var registration: ListenerRegistration? = null
+
+        val job = scope.launch {
+            try {
+                val uid = repository.ensureSignedIn()
+
+                registration = repository.observeFeed(
+                    onUpdate = { posts ->
+                        availablePins = posts.filter { post ->
+                            post.authorId == uid &&
+                                    post.latitude != null &&
+                                    post.longitude != null &&
+                                    post.storagePath.isBlank()
+                        }
+                        loadingPins = false
+                    },
+                    onError = { error ->
+                        loadingPins = false
+                        message = error.localizedMessage
+                            ?: "Could not load your pins."
+                    }
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                loadingPins = false
+                message = error.localizedMessage
+                    ?: "Could not load your pins."
+            }
+        }
+
+        onDispose {
+            job.cancel()
+            registration?.remove()
+        }
+    }
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri -> selectedImage = uri }
@@ -53,6 +98,37 @@ fun PhotoPostScreen(onPosted: (String) -> Unit = {}) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text("Post an Observation", style = MaterialTheme.typography.headlineSmall)
+        Text("Choose the map pin for this photo:")
+
+        if (loadingPins) {
+            Text("Loading your pins...")
+        } else if (availablePins.isEmpty()) {
+            Text("Create a pin on the map first, then return here.")
+        }
+
+        availablePins.forEach { pin ->
+            OutlinedButton(
+                onClick = {
+                    selectedPinId = pin.id
+                    title = pin.title
+                    description = pin.description
+                },
+                enabled = !sending,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                val prefix = if (selectedPinId == pin.id) "✓ " else ""
+
+                Text(
+                    text = prefix + pin.title + "\n" +
+                            String.format(
+                                java.util.Locale.US,
+                                "%.5f, %.5f",
+                                pin.latitude,
+                                pin.longitude
+                            )
+                )
+            }
+        }
         selectedImage?.let { uri ->
             val preview by rememberLocalPhotoBitmap(uri)
             if (preview != null) {
@@ -95,7 +171,16 @@ fun PhotoPostScreen(onPosted: (String) -> Unit = {}) {
                     progress = 0f
                     message = "Uploading photo..."
                     try {
-                        val id = repository.publish(uri, title, description) { progress = it }
+                        val pinId = selectedPinId
+                            ?: error("Choose a map pin first.")
+
+                        val id = repository.publish(
+                            imageUri = uri,
+                            title = title,
+                            description = description,
+                            pinId = pinId,
+                            onProgress = { progress = it }
+                        )
                         message = "Observation posted successfully."
                         selectedImage = null
                         title = ""
@@ -110,7 +195,10 @@ fun PhotoPostScreen(onPosted: (String) -> Unit = {}) {
                     }
                 }
             },
-            enabled = selectedImage != null && title.isNotBlank() && !sending,
+            enabled = selectedImage != null &&
+                    title.isNotBlank() &&
+                    availablePins.any { it.id == selectedPinId } &&
+                    !sending,
             modifier = Modifier.fillMaxWidth()
         ) { Text(if (sending) "Posting..." else "Post Observation") }
         if (sending) {

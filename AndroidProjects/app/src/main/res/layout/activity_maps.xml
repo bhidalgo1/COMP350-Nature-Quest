@@ -32,6 +32,15 @@
             android:layout_marginTop="8dp"
             android:text="Tap map or 'Add Pin Here' to create a pin." />
 
+        <ImageView
+            android:id="@+id/pinPhoto"
+            android:layout_width="match_parent"
+            android:layout_height="140dp"
+            android:layout_marginTop="8dp"
+            android:contentDescription="Photo attached to the selected pin"
+            android:scaleType="centerCrop"
+            android:visibility="gone" />
+
         <Button
             android:id="@+id/addPinButton"
             android:layout_width="match_parent"
