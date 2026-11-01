@@ -27,6 +27,7 @@ fun HomeScreen(
     onCameraClick: () -> Unit,
     onMapClick: () -> Unit,
     onUploadClick: () -> Unit,
+    onLikedPostsClick: () -> Unit,
 ) {
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -40,6 +41,7 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            HomeMenu(onLikedPostsClick = onLikedPostsClick)
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(
