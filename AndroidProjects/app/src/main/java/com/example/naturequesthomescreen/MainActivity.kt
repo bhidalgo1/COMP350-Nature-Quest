@@ -15,13 +15,21 @@ class MainActivity : ComponentActivity() {
         setContent {
             NatureQuestHomeScreenTheme {
                 var showCamera by remember { mutableStateOf(false) }
+                var showLikedPosts by remember { mutableStateOf(false) }
 
-                if (showCamera) {
+                if(showLikedPosts){
+                    LikedPostsScreen(
+                        onBack = { showLikedPosts = false }
+                    )
+                }else if (showCamera) {
                     CameraScreen(
                         onBack = { showCamera = false }
                     )
                 } else {
                     HomeScreen(
+                        onLikedPostsClick = {
+                            showLikedPosts = true
+                        },
                         onCameraClick = {
                             showCamera = true
                         },

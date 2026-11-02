@@ -45,6 +45,46 @@ class ObservationRepository(context: Context) {
         }
     }
 
+    // load the currently signed-in user's liked posts.
+    suspend fun getLikedPosts(): List<ObservationPost> {
+        val userId = ensureSignedIn()
+        val observations = db.collection("observations").get().await()
+        val likedPosts = mutableListOf<ObservationPost>()
+
+        for (document in observations.documents) {
+            val like = document.reference
+                .collection("likes")
+                .document(userId)
+                .get()
+                .await()
+
+            if (!like.exists()) continue
+
+            val authorId = document.getString("authorId") ?: continue
+            val title = document.getString("title") ?: continue
+            val latitude = document.getDouble("latitude")
+            val longitude = document.getDouble("longitude")
+
+            likedPosts.add(
+                ObservationPost(
+                    id = document.id,
+                    authorId = authorId,
+                    title = title,
+                    description = document.getString("description").orEmpty(),
+                    storagePath = document.getString("storagePath").orEmpty(),
+                    createdAt = document.getTimestamp("createdAt"),
+                    latitude = latitude,
+                    longitude = longitude,
+                    isMapPin = document.getBoolean("isMapPin")
+                        ?: (latitude != null && longitude != null)
+                )
+            )
+        }
+
+        return likedPosts.sortedByDescending {
+            it.createdAt?.seconds ?: 0L
+        }
+    }
     suspend fun ensureSignedIn(): String {
         check(FirebaseApp.initializeApp(appContext) != null) {
             "Firebase is not configured. Add the matching google-services.json to app/."
