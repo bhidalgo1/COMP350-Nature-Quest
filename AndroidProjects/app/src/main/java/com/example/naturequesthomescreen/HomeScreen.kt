@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Row
 
 @Composable
 fun HomeScreen(
@@ -41,7 +42,12 @@ fun HomeScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            HomeMenu(onLikedPostsClick = onLikedPostsClick)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                HomeMenu(onLikedPostsClick = onLikedPostsClick)
+            }
             Spacer(modifier = Modifier.height(16.dp))
 
             Text(

@@ -18,7 +18,8 @@ fun HomeMenu(onLikedPostsClick: () -> Unit) {
         IconButton(onClick = { expanded = !expanded }) {
             Icon(
                 imageVector = Icons.Default.Menu,
-                contentDescription = "Open menu"
+                contentDescription = "Open menu",
+
             )
         }
 
