@@ -1,27 +1,26 @@
 package com.example.naturequesthomescreen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.Row
+import com.example.natureobservation.feature.posts.PhotoFeedScreen
 
 @Composable
 fun HomeScreen(
@@ -30,111 +29,136 @@ fun HomeScreen(
     onUploadClick: () -> Unit,
     onLikedPostsClick: () -> Unit,
 ) {
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp)
-                .verticalScroll(rememberScrollState()),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                HomeMenu(onLikedPostsClick = onLikedPostsClick)
-            }
-            Spacer(modifier = Modifier.height(16.dp))
+    // These font changes apply to the home screen and its feed.
+    val homeTypography = MaterialTheme.typography.copy(
+        headlineLarge = MaterialTheme.typography.headlineLarge.copy(
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Bold
+        ),
+        headlineSmall = MaterialTheme.typography.headlineSmall.copy(
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Bold
+        ),
+        titleMedium = MaterialTheme.typography.titleMedium.copy(
+            fontFamily = FontFamily.SansSerif,
+            fontWeight = FontWeight.SemiBold
+        ),
+        bodyLarge = MaterialTheme.typography.bodyLarge.copy(
+            fontFamily = FontFamily.SansSerif
+        ),
+        bodyMedium = MaterialTheme.typography.bodyMedium.copy(
+            fontFamily = FontFamily.SansSerif
+        )
+    )
 
-            Text(
-                text = "Nature Quest",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
+    MaterialTheme(typography = homeTypography) {
+        val colors = MaterialTheme.colorScheme
 
-            Text(
-                text = "Explore nature, record observations, and view interactive map pins.",
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
-            )
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = colors.background,
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Interactive Map Card
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+            // These actions stay visible while the feed scrolls.
+            bottomBar = {
+                BottomAppBar(
+                    containerColor = colors.surfaceVariant,
+                    contentColor = colors.onSurfaceVariant
                 ) {
-                    Text(
-                        text = "Interactive Map",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Button(
-                        onClick = onMapClick,
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Open Map")
+                        TextButton(
+                            onClick = onCameraClick,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Camera",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        TextButton(
+                            onClick = onMapClick,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Map",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+
+                        TextButton(
+                            onClick = onUploadClick,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "Upload",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }
-
-            // Nature Camera Card
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Nature Camera",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                colors.primaryContainer,
+                                colors.background
+                            )
+                        )
                     )
-
-                    Button(
-                        onClick = onCameraClick,
-                        modifier = Modifier.fillMaxWidth()
+                    .padding(innerPadding)
+            ) {
+                // App heading and existing liked-posts menu.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            start = 20.dp,
+                            end = 12.dp,
+                            top = 20.dp,
+                            bottom = 8.dp
+                        ),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Text("Open Camera")
+                        Text(
+                            text = "Nature Quest",
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = colors.onPrimaryContainer
+                        )
+
+                        Text(
+                            text = "Explore. Capture. Share.",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = colors.onPrimaryContainer
+                        )
                     }
+
+                    HomeMenu(
+                        onLikedPostsClick = onLikedPostsClick
+                    )
                 }
-            }
 
-            // Observation Feed & Upload Card
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                // Give the feed the remaining screen height.
+                // Its own LazyColumn handles scrolling.
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
                 ) {
-                    Text(
-                        text = "Observation Feed & Upload",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    
-                    Button(
-                        onClick = onUploadClick,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Upload / View Feed")
-                    }
+                    PhotoFeedScreen()
                 }
             }
         }
