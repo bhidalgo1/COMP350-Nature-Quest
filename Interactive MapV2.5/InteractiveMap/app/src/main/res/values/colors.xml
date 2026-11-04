@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="channel_blue">#002855</color>
+    <color name="islands_teal">#00A3A6</color>
+</resources>

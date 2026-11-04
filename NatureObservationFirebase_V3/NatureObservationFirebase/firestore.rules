@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /observations/{postId} {
+      // Anyone signed in (including anonymous users) can view observations.
+      allow read: if request.auth != null;
+      // Posts are immutable. Only create with the authenticated author's UID.
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['authorId', 'title', 'description', 'storagePath', 'createdAt'])
+        && request.resource.data.keys().hasAll(['authorId', 'title', 'description', 'storagePath', 'createdAt'])
+        && request.resource.data.authorId == request.auth.uid
+        && request.resource.data.title is string
+        && request.resource.data.title.size() > 0
+        && request.resource.data.title.size() <= 100
+        && request.resource.data.description is string
+        && request.resource.data.description.size() <= 1000
+        && request.resource.data.storagePath is string
+        && request.resource.data.storagePath.matches('observation_photos/' + request.auth.uid + '/' + postId + '\\.[a-zA-Z0-9]{1,8}')
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+  }
+}
