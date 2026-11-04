@@ -1,19 +1,33 @@
 package com.example.naturequesthomescreen
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.viewmodel.AuthenticateVm
-import com.example.naturequesthomescreen.RegisterScreen
-import com.example.naturequesthomescreen.LoginScreen
 
 @Composable
-fun NavigateToScreen() {
+fun NavigateToScreen(
+    onMapClick: () -> Unit,
+    onUploadClick: () -> Unit
+) {
     val toScreen = rememberNavController()
+    // Share the same authentication state with both forms.
     val authVm: AuthenticateVm = viewModel()
-    val startingScreen = if (authVm.isUserLoggedIn()) "main screen" else "login"
+    val startingScreen = remember {
+        if (authVm.isUserLoggedIn()) "main screen" else "login"
+    }
+
+    fun openHome() {
+        authVm.resetState()
+        toScreen.navigate("main screen") {
+            // Back from home should not reopen a completed sign-in form.
+            popUpTo("login") { inclusive = true }
+            launchSingleTop = true
+        }
+    }
 
     NavHost(
         navController = toScreen,
@@ -23,12 +37,10 @@ fun NavigateToScreen() {
             LoginScreen(
                 onRegisterClick = {
                     authVm.resetState()
-                    toScreen.navigate("sign up")
+                    toScreen.navigate("sign up") { launchSingleTop = true }
                 },
-                onLoginSuccess = {
-                    authVm.resetState()
-                    toScreen.navigate("main screen") // To the main screen
-                }
+                onLoginSuccess = { openHome() },
+                viewModel = authVm
             )
         }
 
@@ -36,17 +48,28 @@ fun NavigateToScreen() {
             RegisterScreen(
                 onLoginClick = {
                     authVm.resetState()
-                    toScreen.navigate("login")
+                    toScreen.popBackStack("login", inclusive = false)
                 },
-                onRegisterSuccess = {
-                    authVm.resetState()
-                    toScreen.navigate("main screen")
-                }
+                onRegisterSuccess = { openHome() },
+                viewModel = authVm
             )
         }
 
         composable("main screen") {
-            // Move screens and stuff here
+            HomeScreen(
+                onCameraClick = { toScreen.navigate("camera") },
+                onMapClick = onMapClick,
+                onUploadClick = onUploadClick,
+                onLikedPostsClick = { toScreen.navigate("liked posts") }
+            )
+        }
+
+        composable("camera") {
+            CameraScreen(onBack = { toScreen.popBackStack() })
+        }
+
+        composable("liked posts") {
+            LikedPostsScreen(onBack = { toScreen.popBackStack() })
         }
     }
 }
