@@ -3,7 +3,10 @@ package com.example.natureobservation.feature.posts
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.webkit.MimeTypeMap
+import kotlinx.coroutines.NonCancellable
 import com.google.firebase.FirebaseApp
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
@@ -93,6 +96,32 @@ class ObservationRepository(context: Context) {
             ?: error("Anonymous Firebase Authentication is not enabled.")
     }
 
+    suspend fun deletePost(post: ObservationPost) {
+        val userId = auth.currentUser?.uid
+        check(userId != null && userId == post.authorId) {
+            "You can only delete your own posts."
+        }
+
+        val postRef = db.collection("observations").document(post.id)
+
+        withContext(NonCancellable) {
+            db.runTransaction { transaction ->
+                val savedPost = transaction.get(postRef)
+                if (savedPost.exists()) {
+                    check(savedPost.getString("authorId") == userId) {
+                        "You can only delete your own posts."
+                    }
+                    transaction.delete(postRef)
+                }
+                Unit
+            }.await()
+
+            val removed = synchronized(localPosts) {
+                localPosts.removeAll { it.id == post.id }
+            }
+            if (removed) feedListeners.toList().forEach { it.invoke() }
+        }
+    }
     /** Publish a custom Map Pin observation. */
     suspend fun publishPin(
         title: String,
@@ -143,6 +172,11 @@ class ObservationRepository(context: Context) {
         title: String,
         description: String,
         pinId: String? = null,
+        location: com.google.android.gms.maps.model.LatLng? = null,
+        rotationDegrees: Int = 0,
+        photoZoom: Float = 1f,
+        photoPanX: Float = 0f,
+        photoPanY: Float = 0f,
         onProgress: (Float) -> Unit
     ): String {
         val cleanTitle = title.trim()
@@ -156,7 +190,51 @@ class ObservationRepository(context: Context) {
 
         val uid = ensureSignedIn()
         val postId = UUID.randomUUID().toString()
-        val (photo, mimeType) = copySelectedImage(imageUri)
+        val (photo, mimeType) = withContext(Dispatchers.IO) {
+            val (file, originalMimeType) = copySelectedImage(imageUri)
+
+            try {
+                if (rotationDegrees % 360 == 0 && photoZoom == 1f) {
+                    file to originalMimeType
+                } else {
+                    val rotated = decodeDraftPhoto(file, rotationDegrees)
+                    val zoom = photoZoom.coerceIn(1f, 3f)
+                    val width = (rotated.width / zoom).toInt().coerceAtLeast(1)
+                    val height = (rotated.height / zoom).toInt().coerceAtLeast(1)
+
+                    val maxLeft = rotated.width - width
+                    val maxTop = rotated.height - height
+
+                    val cropLeft = (maxLeft * (1f - photoPanX.coerceIn(-1f, 1f)) / 2f)
+                        .toInt()
+                    val cropTop = (maxTop * (1f - photoPanY.coerceIn(-1f, 1f)) / 2f)
+                        .toInt()
+
+                    val edited = Bitmap.createBitmap(rotated, cropLeft, cropTop, width, height)
+
+                    val hasAlpha = edited.hasAlpha()
+                    val format = if (hasAlpha) {
+                        Bitmap.CompressFormat.PNG
+                    } else {
+                        Bitmap.CompressFormat.JPEG
+                    }
+
+                    file.outputStream().use { output ->
+                        check(edited.compress(format, 92, output)) {
+                            "Could not save the rotated photo."
+                        }
+                    }
+                    require(file.length() <= 10L * 1024 * 1024) {
+                        "The rotated photo is too large. Choose a smaller photo."
+                    }
+
+                    file to if (hasAlpha) "image/png" else "image/jpeg"
+                }
+            } catch (failure: Exception) {
+                file.delete()
+                throw failure
+            }
+        }
         val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
             ?.takeIf { it.matches(Regex("[a-zA-Z0-9]{1,8}")) } ?: "jpg"
         val photoId = UUID.randomUUID().toString()
@@ -185,13 +263,19 @@ class ObservationRepository(context: Context) {
             }
 
             if (pinId == null) {
-                val record = mapOf(
+                val record = mutableMapOf<String, Any>(
                     "authorId" to uid,
                     "title" to cleanTitle,
                     "description" to cleanDescription,
                     "storagePath" to storagePath,
                     "createdAt" to FieldValue.serverTimestamp()
                 )
+
+                if (location != null) {
+                    record["latitude"] = location.latitude
+                    record["longitude"] = location.longitude
+                    record["isMapPin"] = true
+                }
 
                 db.collection("observations")
                     .document(postId)
@@ -338,14 +422,88 @@ class ObservationRepository(context: Context) {
             android.graphics.BitmapFactory.decodeFile(temp.absolutePath, bounds)
             var sample = 1
             while (bounds.outWidth / sample > 1200 || bounds.outHeight / sample > 1200) sample *= 2
-            android.graphics.BitmapFactory.decodeFile(
+            val bitmap = android.graphics.BitmapFactory.decodeFile(
                 temp.absolutePath,
                 android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-            )
+            ) ?: return@withContext null
+
+            orientBitmap(bitmap, temp)
         } catch (_: Exception) {
             null
         } finally {
             temp.delete()
+        }
+    }
+    private fun orientBitmap(
+        bitmap: Bitmap,
+        file: File,
+        rotationDegrees: Int = 0
+    ): Bitmap {
+        val orientation = try {
+            ExifInterface(file.absolutePath).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        } catch (_: java.io.IOException) {
+            ExifInterface.ORIENTATION_NORMAL
+        }
+
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.setRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.setRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
+        }
+
+        matrix.postRotate(rotationDegrees.toFloat())
+
+        return if (matrix.isIdentity) {
+            bitmap
+        } else {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        }
+    }
+    private fun decodeDraftPhoto(file: File, rotationDegrees: Int): Bitmap {
+        val bounds = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds)
+
+        var sample = 1
+        while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) {
+            sample *= 2
+        }
+
+        val bitmap = android.graphics.BitmapFactory.decodeFile(
+            file.absolutePath,
+            android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        ) ?: error("Could not open the selected photo.")
+
+        return orientBitmap(bitmap, file, rotationDegrees)
+    }
+
+    suspend fun loadDraftPreview(uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            val (file, _) = copySelectedImage(uri)
+            try {
+                decodeDraftPhoto(file, 0)
+            } finally {
+                file.delete()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
         }
     }
 

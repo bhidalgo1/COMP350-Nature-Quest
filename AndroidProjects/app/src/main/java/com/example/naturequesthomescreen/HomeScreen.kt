@@ -96,7 +96,7 @@ fun HomeScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = "Upload",
+                                text = "New Post",
                                 fontWeight = FontWeight.SemiBold
                             )
                         }

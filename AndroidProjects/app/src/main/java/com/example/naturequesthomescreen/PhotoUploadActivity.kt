@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
+import android.content.Intent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.foundation.Image
@@ -60,13 +61,19 @@ import java.io.File
 import java.io.IOException
 
 class PhotoUploadActivity : ComponentActivity() {
+    companion object {
+        const val EXTRA_FEED_POST_ID = "feed_post_id"
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    var page by rememberSaveable { mutableStateOf("post") }
+                    val feedPostId = intent.getStringExtra(EXTRA_FEED_POST_ID)
+                    var page by rememberSaveable {
+                        mutableStateOf(if (feedPostId == null) "post" else "feed")
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -76,15 +83,28 @@ class PhotoUploadActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxWidth().padding(8.dp),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            OutlinedButton(onClick = { finish() }) { Text("← Home") }
-                            OutlinedButton(onClick = { page = "post" }) { Text("Post") }
-                            OutlinedButton(onClick = { page = "feed" }) { Text("Feed") }
+                            OutlinedButton(
+                                onClick = {
+                                    val homeIntent =
+                                        Intent(this@PhotoUploadActivity, MainActivity::class.java)
+                                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                    startActivity(homeIntent)
+                                }
+                            ) {
+                                Text("← Home")
+                            }
                         }
                         Box(modifier = Modifier.weight(1f)) {
                             when (page) {
-                                "post" -> PhotoPostScreen(onPosted = { page = "feed" })
-                                "feed" -> PhotoFeedScreen()
-                                else -> PhotoPostScreen(onPosted = { page = "feed" })
+                                "post" -> PhotoPostScreen(
+                                    initialLocation = MapActivity.readLocation(intent),
+                                    onPosted = { page = "feed" }
+                                )
+                                "feed" -> PhotoFeedScreen(focusPostId = feedPostId)
+                                else -> PhotoPostScreen(
+                                    initialLocation = MapActivity.readLocation(intent),
+                                    onPosted = { page = "feed" }
+                                )
                             }
                         }
                     }
