@@ -8,6 +8,8 @@ import android.widget.TextView
 import android.widget.Toast
 import android.widget.ImageView
 import android.view.View
+import android.app.Activity
+import android.content.Intent
 import com.example.natureobservation.feature.posts.ObservationPost
 import kotlinx.coroutines.ensureActive
 import com.google.firebase.firestore.ListenerRegistration
@@ -27,7 +29,31 @@ import kotlinx.coroutines.launch
 import java.util.Locale
 
 class MapActivity : AppCompatActivity(), OnMapReadyCallback {
+    companion object {
+        const val EXTRA_PICK_LOCATION = "pick_location"
+        const val EXTRA_LATITUDE = "observation_latitude"
+        const val EXTRA_LONGITUDE = "observation_longitude"
 
+        fun putLocation(intent: Intent, point: LatLng): Intent =
+            intent.putExtra(EXTRA_LATITUDE, point.latitude)
+                .putExtra(EXTRA_LONGITUDE, point.longitude)
+
+        fun readLocation(intent: Intent): LatLng? {
+            if (!intent.hasExtra(EXTRA_LATITUDE) || !intent.hasExtra(EXTRA_LONGITUDE)) {
+                return null
+            }
+            return LatLng(
+                intent.getDoubleExtra(EXTRA_LATITUDE, 0.0),
+                intent.getDoubleExtra(EXTRA_LONGITUDE, 0.0)
+            )
+        }
+    }
+
+    private val pickingLocation by lazy {
+        intent.getBooleanExtra(EXTRA_PICK_LOCATION, false)
+    }
+    private var selectedLocation: LatLng? = null
+    private var selectionMarker: Marker? = null
     private lateinit var googleMap: GoogleMap
     private lateinit var placeTitle: TextView
     private lateinit var placeDetail: TextView
@@ -56,14 +82,29 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         mapFragment.getMapAsync(this)
         showCampus()
 
-        findViewById<Button>(R.id.addPinButton).setOnClickListener {
-            if (::googleMap.isInitialized) {
-                promptAndAddPin(googleMap.cameraPosition.target)
+        findViewById<Button>(R.id.addPinButton).apply {
+            text = if (pickingLocation) "Use this location" else "Post here"
+
+            setOnClickListener {
+                if (!::googleMap.isInitialized) return@setOnClickListener
+
+                val point = selectedLocation ?: googleMap.cameraPosition.target
+
+                if (pickingLocation) {
+                    setResult(Activity.RESULT_OK, putLocation(Intent(), point))
+                    finish()
+                } else {
+                    val postIntent = Intent(this@MapActivity, PhotoUploadActivity::class.java)
+                    startActivity(putLocation(postIntent, point))
+                }
             }
         }
 
         findViewById<Button>(R.id.resetButton).setOnClickListener {
             if (::googleMap.isInitialized) {
+                selectionMarker?.remove()
+                selectionMarker = null
+                selectedLocation = null
                 googleMap.animateCamera(
                     CameraUpdateFactory.newLatLngZoom(campus, 17f)
                 )
@@ -103,14 +144,14 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
             true
         }
 
-        googleMap.setOnMapClickListener { point ->
-            promptAndAddPin(point)
+        googleMap.setOnMapClickListener { point -> selectLocation(point) }
+        googleMap.setOnMapLongClickListener { point -> selectLocation(point) }
+        if (pickingLocation) {
+            readLocation(intent)?.let { point ->
+                googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(point, 17f))
+                selectLocation(point)
+            }
         }
-
-        googleMap.setOnMapLongClickListener { point ->
-            promptAndAddPin(point)
-        }
-
         googleMap.setOnMarkerDragListener(
             object : GoogleMap.OnMarkerDragListener {
                 override fun onMarkerDragStart(marker: Marker) {}
@@ -128,6 +169,20 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         // Sync feed items to map
         mapFeedListener = repository.observeFeed(
             onUpdate = { posts ->
+                val visiblePinIds = posts
+                    .filter { it.latitude != null && it.longitude != null }
+                    .map { it.id }
+                    .toSet()
+
+                userMarkers.removeAll { marker ->
+                    val pin = marker.tag as? ObservationPost
+                    if (pin != null && pin.id !in visiblePinIds) {
+                        marker.remove()
+                        true
+                    } else {
+                        false
+                    }
+                }
                 posts.forEach { post ->
                     val lat = post.latitude
                     val lng = post.longitude
@@ -174,13 +229,32 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         )
     }
 
+    private fun selectLocation(point: LatLng) {
+        findViewById<Button>(R.id.viewPostButton).visibility = View.GONE
+        selectedLocation = point
+        selectionMarker?.remove()
+        selectionMarker = googleMap.addMarker(
+            MarkerOptions().position(point).title("Selected location")
+        )
+
+        photoLoadJob?.cancel()
+        pinPhoto.setImageDrawable(null)
+        pinPhoto.visibility = View.GONE
+        placeTitle.text = "Selected location"
+        placeDetail.text = if (pickingLocation) {
+            "Tap Use this location to return to your post."
+        } else {
+            "Tap Post here to start a post at this spot."
+        }
+    }
     private fun showCampus() {
+        findViewById<Button>(R.id.viewPostButton).visibility = View.GONE
         photoLoadJob?.cancel()
         pinPhoto.setImageDrawable(null)
         pinPhoto.visibility = View.GONE
 
         placeTitle.text = "CSU Channel Islands"
-        placeDetail.text = "Tap map or 'Add Pin Here' to create a pin."
+        placeDetail.text = "Tap the map to select a location."
     }
 
     private fun promptAndAddPin(point: LatLng) {
@@ -284,6 +358,14 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         }
 
         val post = marker.tag as? ObservationPost ?: return
+        findViewById<Button>(R.id.viewPostButton).apply {
+            visibility = View.VISIBLE
+            setOnClickListener {
+                val feedIntent = Intent(this@MapActivity, PhotoUploadActivity::class.java)
+                    .putExtra(PhotoUploadActivity.EXTRA_FEED_POST_ID, post.id)
+                startActivity(feedIntent)
+            }
+        }
 
         if (post.storagePath.isBlank()) {
             return

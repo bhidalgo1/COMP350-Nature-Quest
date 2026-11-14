@@ -3,6 +3,12 @@ package com.example.natureobservation.feature.posts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
+import com.example.naturequesthomescreen.R
+import androidx.compose.material3.AlertDialog
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -26,7 +32,8 @@ private data class PostComment(val id: String, val authorId: String, val text: S
 
 /** Likes are keyed by user ID so a user can have only one like per post. */
 @Composable
-fun PostInteractions(postId: String) {
+fun PostInteractions(observation: ObservationPost, onDeleted: () -> Unit = {}) {
+    val postId = observation.id
     val context = LocalContext.current
     val repository = remember(context) { ObservationRepository(context) }
     val db = remember { FirebaseFirestore.getInstance() }
@@ -40,6 +47,9 @@ fun PostInteractions(postId: String) {
     var dislikesReady by remember(postId) { mutableStateOf(false) }
     var likesReady by remember(postId) { mutableStateOf(false) }
     var changingLike by remember(postId) { mutableStateOf(false) }
+    var confirmDelete by remember(postId) { mutableStateOf(false) }
+    var deleting by remember(postId) { mutableStateOf(false) }
+    var deleteError by remember(postId) { mutableStateOf<String?>(null) }
     var showComments by rememberSaveable(postId) { mutableStateOf(false) }
     var draft by rememberSaveable(postId) { mutableStateOf("") }
     var sending by remember(postId) { mutableStateOf(false) }
@@ -157,10 +167,17 @@ fun PostInteractions(postId: String) {
                         }
                     }
                 }
-            ) { Text(if (liked) "Unlike ($likeCount)" else "Like ($likeCount)") }
-            TextButton(onClick = { showComments = !showComments }) {
-                Text(if (showComments) "Hide comments" else "Comments")
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_thumb_up),
+                    contentDescription = if (liked) "Unlike" else "Like",
+                    tint = if (liked) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(likeCount.toString())
             }
+
             TextButton(
                 enabled = uid != null && dislikesReady && !changingLike,
                 onClick = {
@@ -200,9 +217,63 @@ fun PostInteractions(postId: String) {
                     }
                 }
             ) {
-                Text(
-                    if (disliked) "Undo dislike ($dislikeCount)"
-                    else "Dislike ($dislikeCount)"
+                Icon(
+                    painter = painterResource(R.drawable.ic_thumb_down),
+                    contentDescription = if (disliked) "Undo dislike" else "Dislike",
+                    tint = if (disliked) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(dislikeCount.toString())
+            }
+            TextButton(onClick = { showComments = !showComments }) {
+                Text(if (showComments) "Hide comments" else "Comments")
+            }
+        }
+        if (uid == observation.authorId) {
+            TextButton(
+                enabled = !deleting,
+                onClick = { confirmDelete = true }
+            ) {
+                Text(if (deleting) "Deleting…" else "Delete post")
+            }
+
+            deleteError?.let {
+                Text(it, color = MaterialTheme.colorScheme.error)
+            }
+
+            if (confirmDelete) {
+                AlertDialog(
+                    onDismissRequest = { confirmDelete = false },
+                    title = { Text("Delete post?") },
+                    text = { Text("This will remove your post from the feed.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmDelete = false
+                            deleting = true
+                            deleteError = null
+                            scope.launch {
+                                try {
+                                    repository.deletePost(observation)
+                                    onDeleted()
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (failure: Exception) {
+                                    deleteError = failure.localizedMessage
+                                        ?: "Could not delete your post."
+                                } finally {
+                                    deleting = false
+                                }
+                            }
+                        }) {
+                            Text("Delete")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmDelete = false }) {
+                            Text("Cancel")
+                        }
+                    }
                 )
             }
         }

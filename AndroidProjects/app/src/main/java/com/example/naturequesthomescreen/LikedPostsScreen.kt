@@ -144,7 +144,12 @@ fun LikedPostsScreen(onBack: () -> Unit) {
                                     style = MaterialTheme.typography.labelSmall
                                 )
 
-                                PostInteractions(postId = post.id)
+                                PostInteractions(
+                                    observation = post,
+                                    onDeleted = {
+                                        posts = posts.filterNot { it.id == post.id }
+                                    }
+                                )
                             }
                         }
                     }

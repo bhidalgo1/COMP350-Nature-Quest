@@ -38,7 +38,14 @@
             android:layout_height="140dp"
             android:layout_marginTop="8dp"
             android:contentDescription="Photo attached to the selected pin"
-            android:scaleType="centerCrop"
+            android:scaleType="fitCenter"
+            android:visibility="gone" />
+
+        <Button
+            android:id="@+id/viewPostButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="View post in feed"
             android:visibility="gone" />
 
         <Button
