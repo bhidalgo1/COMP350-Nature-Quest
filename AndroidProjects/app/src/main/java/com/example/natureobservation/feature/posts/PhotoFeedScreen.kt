@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
 import com.example.naturequesthomescreen.MapActivity
+import com.google.android.gms.maps.model.LatLng
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -111,10 +112,18 @@ fun PhotoFeedScreen(focusPostId: String? = null) {
                                         enabled = post.latitude != null &&
                                                 post.longitude != null
                                     ) {
-                                        context.startActivity(
-                                            Intent(context, MapActivity::class.java)
-                                                .putExtra("pin_id", post.id)
-                                        )
+                                        val intent = Intent(context, MapActivity::class.java)
+                                            .putExtra("pin_id", post.id)
+                                            .putExtra("pin_title", post.title)
+                                            .putExtra("pin_description", post.description)
+                                            .putExtra("pin_author", post.authorId)
+                                        if (post.latitude != null && post.longitude != null) {
+                                            MapActivity.putLocation(
+                                                intent,
+                                                LatLng(post.latitude, post.longitude)
+                                            )
+                                        }
+                                        context.startActivity(intent)
                                     }
                             ) {
                                 Row(
