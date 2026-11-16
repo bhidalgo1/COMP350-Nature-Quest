@@ -1,22 +1,18 @@
 package com.example.naturequesthomescreen
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import android.widget.ImageView
-import android.view.View
-import android.app.Activity
-import android.content.Intent
-import com.example.natureobservation.feature.posts.ObservationPost
-import kotlinx.coroutines.ensureActive
-import com.google.firebase.firestore.ListenerRegistration
-import kotlinx.coroutines.Job
-import androidx.appcompat.app.AlertDialog
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
+import androidx.core.content.ContextCompat
 import com.example.natureobservation.feature.posts.ObservationRepository
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
@@ -25,10 +21,14 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
-import kotlinx.coroutines.launch
+import com.google.android.gms.maps.model.TileOverlay
+import com.google.android.gms.maps.model.TileOverlayOptions
+import com.google.maps.android.heatmaps.Gradient
+import com.google.maps.android.heatmaps.HeatmapTileProvider
 import java.util.Locale
 
 class MapActivity : AppCompatActivity(), OnMapReadyCallback {
+
     companion object {
         const val EXTRA_PICK_LOCATION = "pick_location"
         const val EXTRA_LATITUDE = "observation_latitude"
@@ -38,8 +38,8 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
             intent.putExtra(EXTRA_LATITUDE, point.latitude)
                 .putExtra(EXTRA_LONGITUDE, point.longitude)
 
-        fun readLocation(intent: Intent): LatLng? {
-            if (!intent.hasExtra(EXTRA_LATITUDE) || !intent.hasExtra(EXTRA_LONGITUDE)) {
+        fun readLocation(intent: Intent?): LatLng? {
+            if (intent == null || !intent.hasExtra(EXTRA_LATITUDE) || !intent.hasExtra(EXTRA_LONGITUDE)) {
                 return null
             }
             return LatLng(
@@ -49,32 +49,43 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
-    private val pickingLocation by lazy {
-        intent.getBooleanExtra(EXTRA_PICK_LOCATION, false)
-    }
-    private var selectedLocation: LatLng? = null
-    private var selectionMarker: Marker? = null
     private lateinit var googleMap: GoogleMap
     private lateinit var placeTitle: TextView
     private lateinit var placeDetail: TextView
-    private lateinit var pinPhoto: ImageView
-    private var photoLoadJob: Job? = null
-    private var requestedPinFocused = false
-    private var mapFeedListener: ListenerRegistration? = null
+
+    private var pickingLocation = false
+    private var selectedLocation: LatLng? = null
+    private var selectionMarker: Marker? = null
+    private var initialTargetLocation: LatLng? = null
 
     private val userMarkers = mutableListOf<Marker>()
     private val repository by lazy { ObservationRepository(this) }
 
+    private var isHeatmapEnabled = false
+    private var heatmapOverlay: TileOverlay? = null
+
     // Approximate center of CSU Channel Islands.
     private val campus = LatLng(34.1621, -119.0436)
+
+    private val locationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+        if (fineGranted || coarseGranted) {
+            enableMyLocation()
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_maps)
 
+        pickingLocation = intent.getBooleanExtra(EXTRA_PICK_LOCATION, false)
+        initialTargetLocation = readLocation(intent)
+
         placeTitle = findViewById(R.id.placeTitle)
         placeDetail = findViewById(R.id.placeDetail)
-        pinPhoto = findViewById(R.id.pinPhoto)
 
         val mapFragment = supportFragmentManager
             .findFragmentById(R.id.map) as SupportMapFragment
@@ -82,21 +93,20 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         mapFragment.getMapAsync(this)
         showCampus()
 
-        findViewById<Button>(R.id.addPinButton).apply {
-            text = if (pickingLocation) "Use this location" else "Post here"
+        val addPinBtn = findViewById<Button>(R.id.addPinButton)
+        addPinBtn.text = if (pickingLocation) "Use this location" else "Post Here with Pin"
 
-            setOnClickListener {
-                if (!::googleMap.isInitialized) return@setOnClickListener
+        addPinBtn.setOnClickListener {
+            if (!::googleMap.isInitialized) return@setOnClickListener
 
-                val point = selectedLocation ?: googleMap.cameraPosition.target
+            val point = selectedLocation ?: googleMap.cameraPosition.target
 
-                if (pickingLocation) {
-                    setResult(Activity.RESULT_OK, putLocation(Intent(), point))
-                    finish()
-                } else {
-                    val postIntent = Intent(this@MapActivity, PhotoUploadActivity::class.java)
-                    startActivity(putLocation(postIntent, point))
-                }
+            if (pickingLocation) {
+                setResult(RESULT_OK, putLocation(Intent(), point))
+                finish()
+            } else {
+                val postIntent = Intent(this@MapActivity, PhotoUploadActivity::class.java)
+                startActivity(putLocation(postIntent, point))
             }
         }
 
@@ -105,15 +115,22 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
                 selectionMarker?.remove()
                 selectionMarker = null
                 selectedLocation = null
+                val target = initialTargetLocation ?: campus
                 googleMap.animateCamera(
-                    CameraUpdateFactory.newLatLngZoom(campus, 17f)
+                    CameraUpdateFactory.newLatLngZoom(target, 17f)
                 )
 
-                showCampus()
+                if (initialTargetLocation == null) {
+                    showCampus()
+                }
             }
         }
 
-        findViewById<Button>(R.id.backToHomeButton)?.setOnClickListener {
+        findViewById<Button>(R.id.heatmapToggleButton)?.setOnClickListener {
+            toggleHeatmap()
+        }
+
+        findViewById<View>(R.id.backToHomeButton)?.setOnClickListener {
             finish()
         }
     }
@@ -121,8 +138,11 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
     override fun onMapReady(map: GoogleMap) {
         googleMap = map
 
+        enableMyLocation()
+
+        val startLocation = initialTargetLocation ?: campus
         googleMap.moveCamera(
-            CameraUpdateFactory.newLatLngZoom(campus, 17f)
+            CameraUpdateFactory.newLatLngZoom(startLocation, 17f)
         )
 
         val campusMarker = googleMap.addMarker(
@@ -134,6 +154,7 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
 
         googleMap.setOnMarkerClickListener { marker ->
             marker.showInfoWindow()
+            selectedLocation = marker.position
 
             if (marker == campusMarker) {
                 showCampus()
@@ -144,14 +165,73 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
             true
         }
 
-        googleMap.setOnMapClickListener { point -> selectLocation(point) }
-        googleMap.setOnMapLongClickListener { point -> selectLocation(point) }
-        if (pickingLocation) {
-            readLocation(intent)?.let { point ->
-                googleMap.moveCamera(CameraUpdateFactory.newLatLngZoom(point, 17f))
-                selectLocation(point)
+        googleMap.setOnMapClickListener { point ->
+            selectedLocation = point
+            selectionMarker?.remove()
+            selectionMarker = googleMap.addMarker(
+                MarkerOptions()
+                    .position(point)
+                    .title("Selected Pin Location")
+                    .snippet(
+                        String.format(
+                            Locale.US,
+                            "%.5f, %.5f",
+                            point.latitude,
+                            point.longitude
+                        )
+                    )
+            )
+            selectionMarker?.showInfoWindow()
+            showSelectedLocation(point)
+        }
+
+        googleMap.setOnMapLongClickListener { point ->
+            selectedLocation = point
+            selectionMarker?.remove()
+            selectionMarker = googleMap.addMarker(
+                MarkerOptions()
+                    .position(point)
+                    .title("Selected Pin Location")
+                    .snippet(
+                        String.format(
+                            Locale.US,
+                            "%.5f, %.5f",
+                            point.latitude,
+                            point.longitude
+                        )
+                    )
+            )
+            selectionMarker?.showInfoWindow()
+            showSelectedLocation(point)
+        }
+
+        if (initialTargetLocation != null) {
+            val target = initialTargetLocation!!
+            val targetTitle = intent.getStringExtra("pin_title")?.ifBlank { null }
+            val targetDescription = intent.getStringExtra("pin_description")?.ifBlank { null }
+
+            val title = targetTitle ?: "User Pin"
+            val snippet = targetDescription ?: String.format(
+                Locale.US,
+                "%.5f, %.5f",
+                target.latitude,
+                target.longitude
+            )
+
+            val marker = googleMap.addMarker(
+                MarkerOptions()
+                    .position(target)
+                    .title(title)
+                    .snippet(snippet)
+                    .draggable(true)
+            )
+            if (marker != null) {
+                userMarkers.add(marker)
+                marker.showInfoWindow()
+                showPin(marker)
             }
         }
+
         googleMap.setOnMarkerDragListener(
             object : GoogleMap.OnMarkerDragListener {
                 override fun onMarkerDragStart(marker: Marker) {}
@@ -167,180 +247,107 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         )
 
         // Sync feed items to map
-        mapFeedListener = repository.observeFeed(
+        repository.observeFeed(
             onUpdate = { posts ->
-                val visiblePinIds = posts
-                    .filter { it.latitude != null && it.longitude != null }
-                    .map { it.id }
-                    .toSet()
-
-                userMarkers.removeAll { marker ->
-                    val pin = marker.tag as? ObservationPost
-                    if (pin != null && pin.id !in visiblePinIds) {
-                        marker.remove()
-                        true
-                    } else {
-                        false
-                    }
-                }
+                val targetId = intent.getStringExtra("pin_id")
                 posts.forEach { post ->
                     val lat = post.latitude
                     val lng = post.longitude
-
                     if (lat != null && lng != null) {
-                        val existingMarker = userMarkers.firstOrNull {
-                            (it.tag as? ObservationPost)?.id == post.id
-                        } ?: userMarkers.firstOrNull {
-                            it.tag == null &&
-                                    it.position.latitude == lat &&
-                                    it.position.longitude == lng
+                        val pos = LatLng(lat, lng)
+                        val existingMarker = userMarkers.find {
+                            it.position.latitude == lat && it.position.longitude == lng
                         }
-
                         if (existingMarker != null) {
-                            existingMarker.tag = post
                             existingMarker.title = post.title
-                            existingMarker.snippet = post.description
+                            if (post.description.isNotBlank()) {
+                                existingMarker.snippet = post.description
+                            }
+                            if (targetId == post.id || (initialTargetLocation != null &&
+                                        initialTargetLocation!!.latitude == lat &&
+                                        initialTargetLocation!!.longitude == lng)) {
+                                existingMarker.showInfoWindow()
+                                showPin(existingMarker)
+                            }
                         } else {
                             val marker = googleMap.addMarker(
                                 MarkerOptions()
-                                    .position(LatLng(lat, lng))
+                                    .position(pos)
                                     .title(post.title)
-                                    .snippet(post.description)
+                                    .snippet(post.description.ifBlank {
+                                        String.format(Locale.US, "%.5f, %.5f", lat, lng)
+                                    })
                                     .draggable(true)
                             )
-
                             if (marker != null) {
-                                marker.tag = post
                                 userMarkers.add(marker)
+                                if (targetId == post.id || (initialTargetLocation != null &&
+                                            initialTargetLocation!!.latitude == lat &&
+                                            initialTargetLocation!!.longitude == lng)) {
+                                    marker.showInfoWindow()
+                                    showPin(marker)
+                                }
                             }
                         }
                     }
                 }
-
-                focusRequestedPin()
+                if (isHeatmapEnabled) {
+                    refreshHeatmap()
+                }
             },
-            onError = { error ->
-                Toast.makeText(
-                    this@MapActivity,
-                    error.localizedMessage ?: "Could not load map pins.",
-                    Toast.LENGTH_LONG
-                ).show()
+            onError = {}
+        )
+    }
+
+    private fun enableMyLocation() {
+        if (!::googleMap.isInitialized) return
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            try {
+                googleMap.isMyLocationEnabled = true
+                googleMap.uiSettings.isMyLocationButtonEnabled = true
+            } catch (_: SecurityException) {
             }
-        )
-    }
-
-    private fun selectLocation(point: LatLng) {
-        findViewById<Button>(R.id.viewPostButton).visibility = View.GONE
-        selectedLocation = point
-        selectionMarker?.remove()
-        selectionMarker = googleMap.addMarker(
-            MarkerOptions().position(point).title("Selected location")
-        )
-
-        photoLoadJob?.cancel()
-        pinPhoto.setImageDrawable(null)
-        pinPhoto.visibility = View.GONE
-        placeTitle.text = "Selected location"
-        placeDetail.text = if (pickingLocation) {
-            "Tap Use this location to return to your post."
         } else {
-            "Tap Post here to start a post at this spot."
-        }
-    }
-    private fun showCampus() {
-        findViewById<Button>(R.id.viewPostButton).visibility = View.GONE
-        photoLoadJob?.cancel()
-        pinPhoto.setImageDrawable(null)
-        pinPhoto.visibility = View.GONE
-
-        placeTitle.text = "CSU Channel Islands"
-        placeDetail.text = "Tap the map to select a location."
-    }
-
-    private fun promptAndAddPin(point: LatLng) {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            val paddingPx = (16 * resources.displayMetrics.density).toInt()
-            setPadding(paddingPx, (8 * resources.displayMetrics.density).toInt(), paddingPx, 0)
-        }
-
-        val titleInput = EditText(this).apply {
-            hint = "Title (e.g. Library, Food Court)"
-            setSingleLine()
-        }
-
-        val descriptionInput = EditText(this).apply {
-            hint = "Description (e.g. Quiet study spot)"
-            isSingleLine = false
-            minLines = 2
-            maxLines = 4
-        }
-
-        container.addView(titleInput)
-        container.addView(descriptionInput)
-
-        AlertDialog.Builder(this)
-            .setTitle("Create Custom Pin")
-            .setMessage(
-                String.format(
-                    Locale.US,
-                    "Location: %.5f, %.5f",
-                    point.latitude,
-                    point.longitude
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
                 )
             )
-            .setView(container)
-            .setPositiveButton("Add Pin") { _, _ ->
-                val pinTitle = titleInput.text.toString().ifBlank {
-                    "User Pin"
-                }
-                val pinDescription = descriptionInput.text.toString().trim()
-
-                addPin(point, pinTitle, pinDescription)
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
+        }
     }
 
-    private fun addPin(point: LatLng, pinTitle: String, pinDescription: String) {
-        val newMarker = googleMap.addMarker(
-            MarkerOptions()
-                .position(point)
-                .title(pinTitle)
-                .snippet(pinDescription)
-                .draggable(true)
+    private fun showSelectedLocation(point: LatLng) {
+        findViewById<LinearLayout>(R.id.detailsContainer)?.visibility = View.VISIBLE
+        placeTitle.text = "Selected Pin Location"
+        placeDetail.text = String.format(
+            Locale.US,
+            "Latitude %.5f · Longitude %.5f\n(Tap '%s' to create observation post)",
+            point.latitude,
+            point.longitude,
+            if (pickingLocation) "Use this location" else "Post Here with Pin"
         )
-
-        if (newMarker != null) {
-            userMarkers.add(newMarker)
-            newMarker.showInfoWindow()
-            showPin(newMarker)
-        }
-
-        // Link map pin to observation feed
-        lifecycleScope.launch {
-            try {
-                repository.publishPin(
-                    title = pinTitle,
-                    description = pinDescription,
-                    latitude = point.latitude,
-                    longitude = point.longitude
-                )
-                Toast.makeText(
-                    this@MapActivity,
-                    "Pin added to Observation Feed!",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } catch (_: Exception) {
-            }
-        }
     }
+
+    private fun showCampus() {
+        placeTitle.text = ""
+        placeDetail.text = ""
+        findViewById<LinearLayout>(R.id.detailsContainer)?.visibility = View.GONE
+    }
+
+
+
+
 
     private fun showPin(marker: Marker) {
-        photoLoadJob?.cancel()
-        pinPhoto.setImageDrawable(null)
-        pinPhoto.visibility = View.GONE
-
+        findViewById<LinearLayout>(R.id.detailsContainer)?.visibility = View.VISIBLE
         placeTitle.text = marker.title ?: "User Pin"
 
         val descriptionText = marker.snippet
@@ -356,64 +363,82 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         } else {
             locationText
         }
+    }
 
-        val post = marker.tag as? ObservationPost ?: return
-        findViewById<Button>(R.id.viewPostButton).apply {
-            visibility = View.VISIBLE
-            setOnClickListener {
-                val feedIntent = Intent(this@MapActivity, PhotoUploadActivity::class.java)
-                    .putExtra(PhotoUploadActivity.EXTRA_FEED_POST_ID, post.id)
-                startActivity(feedIntent)
-            }
-        }
+    private fun toggleHeatmap() {
+        if (!::googleMap.isInitialized) return
 
-        if (post.storagePath.isBlank()) {
-            return
-        }
-
-        photoLoadJob = lifecycleScope.launch {
-            val bitmap = repository.loadPreview(post.storagePath)
-
-            // Ignore a previous photo request if another pin was selected.
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-
-            if (bitmap != null) {
-                pinPhoto.setImageBitmap(bitmap)
-                pinPhoto.contentDescription = "Photo for ${post.title}"
-                pinPhoto.visibility = View.VISIBLE
-            } else {
+        if (isHeatmapEnabled) {
+            heatmapOverlay?.remove()
+            heatmapOverlay = null
+            isHeatmapEnabled = false
+            updateHeatmapButtonText()
+            Toast.makeText(this, "Heatmap View: OFF (Normal Map)", Toast.LENGTH_SHORT).show()
+        } else {
+            refreshHeatmap()
+            if (heatmapOverlay != null) {
+                isHeatmapEnabled = true
+                updateHeatmapButtonText()
                 Toast.makeText(
-                    this@MapActivity,
-                    "Could not load this pin's photo. Tap the pin to retry.",
+                    this,
+                    "Heatmap View: ON (Showing wildlife & plant sighting density)",
                     Toast.LENGTH_SHORT
                 ).show()
             }
         }
     }
-    private fun focusRequestedPin() {
-        if (requestedPinFocused) return
 
-        val pinId = intent.getStringExtra("pin_id") ?: return
+    private fun refreshHeatmap() {
+        if (!::googleMap.isInitialized) return
+        heatmapOverlay?.remove()
+        heatmapOverlay = null
 
-        val marker = userMarkers.firstOrNull {
-            (it.tag as? ObservationPost)?.id == pinId
-        } ?: return
-
-        requestedPinFocused = true
-
-        googleMap.animateCamera(
-            CameraUpdateFactory.newLatLngZoom(
-                marker.position,
-                18f
+        val points = getHeatmapPoints()
+        if (points.isNotEmpty()) {
+            val colors = intArrayOf(
+                Color.rgb(102, 178, 255), // Light Blue: low density / rare sightings
+                Color.rgb(102, 225, 0),   // Green: mild density
+                Color.rgb(255, 255, 0),   // Yellow: moderate activity
+                Color.rgb(255, 128, 0),   // Orange: high activity
+                Color.rgb(255, 0, 0)      // Red: highest density / popular hotspots
             )
-        )
+            val startPoints = floatArrayOf(0.1f, 0.3f, 0.5f, 0.75f, 1.0f)
+            val gradient = Gradient(colors, startPoints)
 
-        marker.showInfoWindow()
-        showPin(marker)
+            val provider = HeatmapTileProvider.Builder()
+                .data(points)
+                .gradient(gradient)
+                .radius(45)
+                .opacity(0.75)
+                .build()
+
+            heatmapOverlay = googleMap.addTileOverlay(
+                TileOverlayOptions().tileProvider(provider)
+            )
+        }
     }
-    override fun onDestroy() {
-        mapFeedListener?.remove()
-        photoLoadJob?.cancel()
-        super.onDestroy()
+
+    private fun updateHeatmapButtonText() {
+        if (isHeatmapEnabled) {
+            findViewById<Button>(R.id.heatmapToggleButton)?.text = "Hide Wildlife Heatmap"
+        } else {
+            findViewById<Button>(R.id.heatmapToggleButton)?.text = "Show Wildlife Heatmap"
+        }
+    }
+
+    private fun getHeatmapPoints(): List<LatLng> {
+        val points = mutableListOf<LatLng>()
+
+        userMarkers.forEach { marker ->
+            val pos = marker.position
+            points.add(pos)
+            repeat(15) {
+                val offsetLat = (Math.random() - 0.5) * 0.0006
+                val offsetLng = (Math.random() - 0.5) * 0.0006
+                points.add(LatLng(pos.latitude + offsetLat, pos.longitude + offsetLng))
+            }
+        }
+
+        return points
     }
 }
