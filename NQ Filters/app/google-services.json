@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "1056395633482",
+    "project_id": "sprint-0-uploader",
+    "storage_bucket": "sprint-0-uploader.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1056395633482:android:047e047711d3b2029657b3",
+        "android_client_info": {
+          "package_name": "com.example.natureobservation"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXQ23jDyQC1g9Snqbnot_jQEQXk-zxcwE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1056395633482:android:8f753d8ab175d0179657b3",
+        "android_client_info": {
+          "package_name": "com.example.naturequesthomescreen"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXQ23jDyQC1g9Snqbnot_jQEQXk-zxcwE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
