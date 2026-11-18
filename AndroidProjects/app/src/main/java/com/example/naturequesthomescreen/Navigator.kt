@@ -6,6 +6,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.natureobservation.feature.posts.normalizeOrganisms
 import com.example.viewmodel.AuthenticateVm
 
 @Composable
@@ -60,7 +61,28 @@ fun NavigateToScreen(
                 onCameraClick = { toScreen.navigate("camera") },
                 onMapClick = onMapClick,
                 onUploadClick = onUploadClick,
-                onLikedPostsClick = { toScreen.navigate("liked posts") }
+                onLikedPostsClick = { toScreen.navigate("liked posts") },
+                onFiltersClick = { toScreen.navigate("filters") }
+            )
+        }
+
+        composable("filters") {
+            FiltersScreen(
+                onBack = { toScreen.popBackStack() },
+                onApplyFiltersClick = { categories ->
+                    val selected = normalizeOrganisms(categories)
+                    toScreen.navigate("filtered posts/" + selected.joinToString(","))
+                }
+            )
+        }
+
+        composable("filtered posts/{categories}") { entry ->
+            val selected = normalizeOrganisms(
+                entry.arguments?.getString("categories").orEmpty().split(',').filter { it.isNotBlank() }
+            )
+            FilteredPostsScreen(
+                selectedCategories = selected,
+                onBack = { toScreen.popBackStack() }
             )
         }
 
