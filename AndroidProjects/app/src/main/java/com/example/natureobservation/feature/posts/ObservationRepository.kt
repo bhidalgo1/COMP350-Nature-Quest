@@ -329,7 +329,8 @@ class ObservationRepository(context: Context) {
     }
 
     /** Storage SDK enforces authenticated reads; temp files are deleted after decoding. */
-    suspend fun loadPreview(storagePath: String): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun loadPreview(storagePath: String, maxDimension: Int = 1200): Bitmap? = withContext(Dispatchers.IO) {
+        require(maxDimension in 64..1200)
         if (storagePath.isBlank()) return@withContext null
         val temp = File.createTempFile("observation_", ".img", appContext.cacheDir)
         try {
@@ -337,11 +338,13 @@ class ObservationRepository(context: Context) {
             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeFile(temp.absolutePath, bounds)
             var sample = 1
-            while (bounds.outWidth / sample > 1200 || bounds.outHeight / sample > 1200) sample *= 2
+            while (bounds.outWidth / sample > maxDimension || bounds.outHeight / sample > maxDimension) sample *= 2
             android.graphics.BitmapFactory.decodeFile(
                 temp.absolutePath,
                 android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
             )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             null
         } finally {

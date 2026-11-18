@@ -1,5 +1,6 @@
 package com.example.naturequesthomescreen
 
+import com.example.naturequesthomescreen.ui.components.AuthorHeader
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
@@ -139,10 +140,7 @@ fun LikedPostsScreen(onBack: () -> Unit) {
                                     Text(post.description)
                                 }
 
-                                Text(
-                                    text = "Posted by ${post.authorId.take(8)}",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
+                                AuthorHeader(authorId = post.authorId)
 
                                 PostInteractions(postId = post.id)
                             }
