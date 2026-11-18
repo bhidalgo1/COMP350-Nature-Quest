@@ -3,7 +3,10 @@ package com.example.natureobservation.feature.posts
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.webkit.MimeTypeMap
+import kotlinx.coroutines.NonCancellable
 import com.google.firebase.FirebaseApp
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
@@ -71,6 +74,7 @@ class ObservationRepository(context: Context) {
                     authorId = authorId,
                     title = title,
                     description = document.getString("description").orEmpty(),
+                    organism = document.getString("organism").orEmpty(),
                     storagePath = document.getString("storagePath").orEmpty(),
                     createdAt = document.getTimestamp("createdAt"),
                     latitude = latitude,
@@ -93,15 +97,43 @@ class ObservationRepository(context: Context) {
             ?: error("Anonymous Firebase Authentication is not enabled.")
     }
 
+    suspend fun deletePost(post: ObservationPost) {
+        val userId = auth.currentUser?.uid
+        check(userId != null && userId == post.authorId) {
+            "You can only delete your own posts."
+        }
+
+        val postRef = db.collection("observations").document(post.id)
+
+        withContext(NonCancellable) {
+            db.runTransaction { transaction ->
+                val savedPost = transaction.get(postRef)
+                if (savedPost.exists()) {
+                    check(savedPost.getString("authorId") == userId) {
+                        "You can only delete your own posts."
+                    }
+                    transaction.delete(postRef)
+                }
+                Unit
+            }.await()
+
+            val removed = synchronized(localPosts) {
+                localPosts.removeAll { it.id == post.id }
+            }
+            if (removed) feedListeners.toList().forEach { it.invoke() }
+        }
+    }
     /** Publish a custom Map Pin observation. */
     suspend fun publishPin(
         title: String,
         description: String,
         latitude: Double,
-        longitude: Double
+        longitude: Double,
+        organism: String = ""
     ): String {
         val cleanTitle = title.trim().ifBlank { "Map Pin Observation" }
         val cleanDescription = description.trim()
+        require(organism.isEmpty() || organism in ORGANISM_CATEGORIES) { "Choose a supported category." }
         val uid = try { ensureSignedIn() } catch (_: Exception) { "user_${UUID.randomUUID().toString().take(8)}" }
         val postId = UUID.randomUUID().toString()
 
@@ -110,6 +142,7 @@ class ObservationRepository(context: Context) {
             authorId = uid,
             title = cleanTitle,
             description = cleanDescription,
+            organism = organism,
             storagePath = "",
             createdAt = Timestamp.now(),
             latitude = latitude,
@@ -124,6 +157,7 @@ class ObservationRepository(context: Context) {
                 "authorId" to uid,
                 "title" to cleanTitle,
                 "description" to cleanDescription,
+                "organism" to organism,
                 "storagePath" to "",
                 "latitude" to latitude,
                 "longitude" to longitude,
@@ -143,10 +177,17 @@ class ObservationRepository(context: Context) {
         title: String,
         description: String,
         pinId: String? = null,
+        location: com.google.android.gms.maps.model.LatLng? = null,
+        rotationDegrees: Int = 0,
+        photoZoom: Float = 1f,
+        photoPanX: Float = 0f,
+        photoPanY: Float = 0f,
+        organism: String = "",
         onProgress: (Float) -> Unit
     ): String {
         val cleanTitle = title.trim()
         val cleanDescription = description.trim()
+        require(organism.isEmpty() || organism in ORGANISM_CATEGORIES) { "Choose a supported category." }
         require(cleanTitle.isNotEmpty() && cleanTitle.length <= 100) {
             "Enter a title (up to 100 characters)."
         }
@@ -156,7 +197,51 @@ class ObservationRepository(context: Context) {
 
         val uid = ensureSignedIn()
         val postId = UUID.randomUUID().toString()
-        val (photo, mimeType) = copySelectedImage(imageUri)
+        val (photo, mimeType) = withContext(Dispatchers.IO) {
+            val (file, originalMimeType) = copySelectedImage(imageUri)
+
+            try {
+                if (rotationDegrees % 360 == 0 && photoZoom == 1f) {
+                    file to originalMimeType
+                } else {
+                    val rotated = decodeDraftPhoto(file, rotationDegrees)
+                    val zoom = photoZoom.coerceIn(1f, 3f)
+                    val width = (rotated.width / zoom).toInt().coerceAtLeast(1)
+                    val height = (rotated.height / zoom).toInt().coerceAtLeast(1)
+
+                    val maxLeft = rotated.width - width
+                    val maxTop = rotated.height - height
+
+                    val cropLeft = (maxLeft * (1f - photoPanX.coerceIn(-1f, 1f)) / 2f)
+                        .toInt()
+                    val cropTop = (maxTop * (1f - photoPanY.coerceIn(-1f, 1f)) / 2f)
+                        .toInt()
+
+                    val edited = Bitmap.createBitmap(rotated, cropLeft, cropTop, width, height)
+
+                    val hasAlpha = edited.hasAlpha()
+                    val format = if (hasAlpha) {
+                        Bitmap.CompressFormat.PNG
+                    } else {
+                        Bitmap.CompressFormat.JPEG
+                    }
+
+                    file.outputStream().use { output ->
+                        check(edited.compress(format, 92, output)) {
+                            "Could not save the rotated photo."
+                        }
+                    }
+                    require(file.length() <= 10L * 1024 * 1024) {
+                        "The rotated photo is too large. Choose a smaller photo."
+                    }
+
+                    file to if (hasAlpha) "image/png" else "image/jpeg"
+                }
+            } catch (failure: Exception) {
+                file.delete()
+                throw failure
+            }
+        }
         val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
             ?.takeIf { it.matches(Regex("[a-zA-Z0-9]{1,8}")) } ?: "jpg"
         val photoId = UUID.randomUUID().toString()
@@ -185,13 +270,20 @@ class ObservationRepository(context: Context) {
             }
 
             if (pinId == null) {
-                val record = mapOf(
+                val record = mutableMapOf<String, Any>(
                     "authorId" to uid,
                     "title" to cleanTitle,
                     "description" to cleanDescription,
+                    "organism" to organism,
                     "storagePath" to storagePath,
                     "createdAt" to FieldValue.serverTimestamp()
                 )
+
+                if (location != null) {
+                    record["latitude"] = location.latitude
+                    record["longitude"] = location.longitude
+                    record["isMapPin"] = true
+                }
 
                 db.collection("observations")
                     .document(postId)
@@ -263,16 +355,20 @@ class ObservationRepository(context: Context) {
     /** Feed updates automatically whenever an observation is published. */
     fun observeFeed(
         onUpdate: (List<ObservationPost>) -> Unit,
-        onError: (Exception) -> Unit
+        onError: (Exception) -> Unit,
+        organisms: List<String> = emptyList()
     ): ListenerRegistration {
+        val selected = normalizeOrganisms(organisms)
         var lastRemotePosts = emptyList<ObservationPost>()
+        var hasRemoteSnapshot = false
 
         fun emitCombined() {
             val local = getLocalPosts()
             val combined = (local + lastRemotePosts)
+                .filter { selected.isEmpty() || it.organism in selected }
                 .distinctBy { it.id }
                 .sortedByDescending { it.createdAt?.seconds ?: Long.MAX_VALUE }
-            onUpdate(combined)
+            if (hasRemoteSnapshot || combined.isNotEmpty()) onUpdate(combined)
         }
 
         val listener = {
@@ -285,36 +381,43 @@ class ObservationRepository(context: Context) {
         emitCombined()
 
         val firestoreRegistration = try {
-            db.collection("observations")
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(40)
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        onError(error)
-                        emitCombined()
-                    } else if (snapshot != null) {
-                        lastRemotePosts = snapshot.documents.mapNotNull { document ->
-                            val author = document.getString("authorId") ?: return@mapNotNull null
-                            val title = document.getString("title") ?: return@mapNotNull null
-                            val lat = document.getDouble("latitude")
-                            val lng = document.getDouble("longitude")
-                            val isPin = document.getBoolean("isMapPin") ?: (lat != null && lng != null)
-                            ObservationPost(
-                                id = document.id,
-                                authorId = author,
-                                title = title,
-                                description = document.getString("description").orEmpty(),
-                                storagePath = document.getString("storagePath").orEmpty(),
-                                createdAt = document.getTimestamp("createdAt"),
-                                latitude = lat,
-                                longitude = lng,
-                                isMapPin = isPin
-                            )
-                        }
-                        emitCombined()
+            val collection = db.collection("observations")
+            val query: Query = if (selected.isEmpty()) {
+                collection.orderBy("createdAt", Query.Direction.DESCENDING).limit(40)
+            } else {
+                // One server query for all selected categories. Sort the results
+                // locally to avoid requiring a new composite index.
+                collection.whereIn("organism", selected)
+            }
+            query.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(error)
+                } else if (snapshot != null) {
+                    hasRemoteSnapshot = true
+                    lastRemotePosts = snapshot.documents.mapNotNull { document ->
+                        val author = document.getString("authorId") ?: return@mapNotNull null
+                        val title = document.getString("title") ?: return@mapNotNull null
+                        val lat = document.getDouble("latitude")
+                        val lng = document.getDouble("longitude")
+                        val isPin = document.getBoolean("isMapPin") ?: (lat != null && lng != null)
+                        ObservationPost(
+                            id = document.id,
+                            authorId = author,
+                            title = title,
+                            description = document.getString("description").orEmpty(),
+                            organism = document.getString("organism").orEmpty(),
+                            storagePath = document.getString("storagePath").orEmpty(),
+                            createdAt = document.getTimestamp("createdAt"),
+                            latitude = lat,
+                            longitude = lng,
+                            isMapPin = isPin
+                        )
                     }
+                    emitCombined()
                 }
-        } catch (_: Exception) {
+            }
+        } catch (failure: Exception) {
+            onError(failure)
             null
         }
 
@@ -329,7 +432,8 @@ class ObservationRepository(context: Context) {
     }
 
     /** Storage SDK enforces authenticated reads; temp files are deleted after decoding. */
-    suspend fun loadPreview(storagePath: String): Bitmap? = withContext(Dispatchers.IO) {
+    suspend fun loadPreview(storagePath: String, maxDimension: Int = 1200): Bitmap? = withContext(Dispatchers.IO) {
+        require(maxDimension in 64..1200)
         if (storagePath.isBlank()) return@withContext null
         val temp = File.createTempFile("observation_", ".img", appContext.cacheDir)
         try {
@@ -337,15 +441,91 @@ class ObservationRepository(context: Context) {
             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeFile(temp.absolutePath, bounds)
             var sample = 1
-            while (bounds.outWidth / sample > 1200 || bounds.outHeight / sample > 1200) sample *= 2
-            android.graphics.BitmapFactory.decodeFile(
+            while (bounds.outWidth / sample > maxDimension || bounds.outHeight / sample > maxDimension) sample *= 2
+            val bitmap = android.graphics.BitmapFactory.decodeFile(
                 temp.absolutePath,
                 android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-            )
+            ) ?: return@withContext null
+
+            orientBitmap(bitmap, temp)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             null
         } finally {
             temp.delete()
+        }
+    }
+    private fun orientBitmap(
+        bitmap: Bitmap,
+        file: File,
+        rotationDegrees: Int = 0
+    ): Bitmap {
+        val orientation = try {
+            ExifInterface(file.absolutePath).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        } catch (_: java.io.IOException) {
+            ExifInterface.ORIENTATION_NORMAL
+        }
+
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.setRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.setRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
+        }
+
+        matrix.postRotate(rotationDegrees.toFloat())
+
+        return if (matrix.isIdentity) {
+            bitmap
+        } else {
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        }
+    }
+    private fun decodeDraftPhoto(file: File, rotationDegrees: Int): Bitmap {
+        val bounds = android.graphics.BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        android.graphics.BitmapFactory.decodeFile(file.absolutePath, bounds)
+
+        var sample = 1
+        while (bounds.outWidth / sample > 2048 || bounds.outHeight / sample > 2048) {
+            sample *= 2
+        }
+
+        val bitmap = android.graphics.BitmapFactory.decodeFile(
+            file.absolutePath,
+            android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        ) ?: error("Could not open the selected photo.")
+
+        return orientBitmap(bitmap, file, rotationDegrees)
+    }
+
+    suspend fun loadDraftPreview(uri: Uri): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            val (file, _) = copySelectedImage(uri)
+            try {
+                decodeDraftPhoto(file, 0)
+            } finally {
+                file.delete()
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
         }
     }
 

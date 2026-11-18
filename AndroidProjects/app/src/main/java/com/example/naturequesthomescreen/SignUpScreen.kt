@@ -1,5 +1,6 @@
 package com.example.naturequesthomescreen
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +23,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -29,6 +32,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -43,12 +47,17 @@ import com.example.viewmodel.AuthenticateVm
 fun RegisterScreen(
     onLoginClick: () -> Unit,
     onRegisterSuccess: () -> Unit,
-    viewModel: AuthenticateVm = viewModel()
+    viewModel: AuthenticateVm = viewModel(),
+    onBack: (() -> Unit)? = null
 ) {
-    var username by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("")}
+    var username by rememberSaveable { mutableStateOf("") }
+    var email by rememberSaveable { mutableStateOf("")}
     var password by remember { mutableStateOf("")}
     val state by viewModel.authState.collectAsState()
+
+    // Keep the in-flight authentication result attached to this screen.
+    BackHandler(enabled = state.isLoading) { }
+    BackHandler(enabled = !state.isLoading) { (onBack ?: onLoginClick).invoke() }
 
     LaunchedEffect(state.successful) {
         if (state.successful) onRegisterSuccess()
@@ -63,13 +72,17 @@ fun RegisterScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         )
         {
+            if (onBack != null) {
+                TextButton(onClick = onBack, enabled = !state.isLoading) { Text("Back") }
+            }
+
             Spacer(modifier = Modifier.height(56.dp))
 
             Text(
                 "Nature Quest",
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.surface
+                color = MaterialTheme.colorScheme.onBackground
             )
 
             Card(
@@ -131,8 +144,15 @@ fun RegisterScreen(
                         visualTransformation = PasswordVisualTransformation()
                     )
 
+                    state.error?.let { message ->
+                        Text(message, color = MaterialTheme.colorScheme.error)
+                    }
+                    if (state.isLoading) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+
                     Button(
-                        enabled = username.isNotBlank() && email.isNotBlank() && password.isNotBlank(),
+                        enabled = !state.isLoading && username.isNotBlank() && email.isNotBlank() && password.isNotBlank(),
                         onClick = { viewModel.register(username, email, password) },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -140,10 +160,13 @@ fun RegisterScreen(
                         shape = RoundedCornerShape(14.dp)
                     ) {
                         Text(
-                            "Create account",
+                            if (state.isLoading) "Creating account..." else "Create account",
                             style = MaterialTheme.typography.labelLarge,
                             fontSize = 16.sp
                         )
+                    }
+                    TextButton(onClick = onLoginClick, enabled = !state.isLoading) {
+                        Text("Already have an account? Log in")
                     }
                 }
             }
