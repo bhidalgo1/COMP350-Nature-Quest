@@ -39,12 +39,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.Locale
 
 /** Live Firestore feed. The host app can display this anywhere in its navigation. */
 @Composable
-fun PhotoFeedScreen(focusPostId: String? = null) {
+fun PhotoFeedScreen(
+    focusPostId: String? = null,
+    organismFilters: List<String> = emptyList()
+) {
     val context = LocalContext.current
     val repository = remember(context) { ObservationRepository(context) }
     val scope = rememberCoroutineScope()
@@ -62,12 +66,16 @@ fun PhotoFeedScreen(focusPostId: String? = null) {
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
 
-    DisposableEffect(repository) {
+    DisposableEffect(repository, organismFilters) {
+        loading = true
+        error = null
+        posts.clear()
         var registration: ListenerRegistration? = null
         val job = scope.launch {
             try {
                 repository.ensureSignedIn()
                 registration = repository.observeFeed(
+                    organisms = organismFilters,
                     onUpdate = { items ->
                         posts.clear()
                         posts.addAll(items)
@@ -79,6 +87,8 @@ fun PhotoFeedScreen(focusPostId: String? = null) {
                         loading = false
                     }
                 )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (failure: Exception) {
                 error = failure.localizedMessage ?: "Could not connect to Firebase."
                 loading = false
@@ -88,10 +98,18 @@ fun PhotoFeedScreen(focusPostId: String? = null) {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("Nature Observations", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            if (organismFilters.isEmpty()) "Nature Observations" else "Filtered observations",
+            style = MaterialTheme.typography.headlineSmall
+        )
+        if (organismFilters.isNotEmpty()) {
+            Text(organismFilters.joinToString(", "), style = MaterialTheme.typography.bodySmall)
+        }
         if (loading) Text("Loading posts...")
         error?.let { Text("Feed error: $it", color = MaterialTheme.colorScheme.error) }
-        if (!loading && posts.isEmpty() && error == null) Text("No observations posted yet.")
+        if (!loading && posts.isEmpty() && error == null) {
+            Text(if (organismFilters.isEmpty()) "No observations posted yet." else "No posts match these categories yet.")
+        }
         LazyColumn(
             state = listState,
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -192,6 +210,10 @@ fun PhotoFeedScreen(focusPostId: String? = null) {
                                     Text(if (expanded) "Show less" else "Show more")
                                 }
                             }
+                        }
+
+                        if (post.organism.isNotBlank()) {
+                            Text("Category: ${post.organism}", style = MaterialTheme.typography.labelSmall)
                         }
 
                         Text(

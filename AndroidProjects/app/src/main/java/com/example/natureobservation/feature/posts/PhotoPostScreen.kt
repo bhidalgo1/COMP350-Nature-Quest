@@ -36,6 +36,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.RadioButton
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -59,6 +63,7 @@ fun PhotoPostScreen(
     val context = LocalContext.current
     val repository = remember(context) { ObservationRepository(context) }
     val scope = rememberCoroutineScope()
+    var selectedOrganism by rememberSaveable { mutableStateOf("") }
     var selectedImage by remember { mutableStateOf<Uri?>(null) }
     var rotationDegrees by rememberSaveable { mutableStateOf(0) }
     var photoZoom by rememberSaveable { mutableStateOf(1f) }
@@ -226,6 +231,26 @@ fun PhotoPostScreen(
             enabled = !sending,
             modifier = Modifier.fillMaxWidth()
         )
+        Text("Category (optional)", style = MaterialTheme.typography.titleMedium)
+        (listOf("") + ORGANISM_CATEGORIES).forEach { category ->
+            Row(
+                modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                    .selectable(
+                        selected = selectedOrganism == category,
+                        enabled = !sending,
+                        role = Role.RadioButton,
+                        onClick = { selectedOrganism = category }
+                    ),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                RadioButton(
+                    selected = selectedOrganism == category,
+                    onClick = null,
+                    enabled = !sending
+                )
+                Text(if (category.isBlank()) "Uncategorized" else category)
+            }
+        }
         Button(
             onClick = {
                 val uri = selectedImage ?: return@Button
@@ -240,6 +265,7 @@ fun PhotoPostScreen(
                             imageUri = uri,
                             title = title,
                             description = description,
+                            organism = selectedOrganism,
                             location = location,
                             rotationDegrees = rotationDegrees,
                             photoZoom = photoZoom,
@@ -251,6 +277,7 @@ fun PhotoPostScreen(
                         selectedImage = null
                         title = ""
                         description = ""
+                        selectedOrganism = ""
                         onPosted(id)
                     } catch (cancelled: CancellationException) {
                         throw cancelled

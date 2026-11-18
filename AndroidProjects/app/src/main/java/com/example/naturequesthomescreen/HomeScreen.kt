@@ -29,6 +29,7 @@ fun HomeScreen(
     onMapClick: () -> Unit,
     onUploadClick: () -> Unit,
     onLikedPostsClick: () -> Unit,
+    onFiltersClick: () -> Unit,
 ) {
     // These font changes apply to the home screen and its feed.
     val homeTypography = MaterialTheme.typography.copy(
@@ -168,7 +169,8 @@ fun HomeScreen(
                     }
 
                     HomeMenu(
-                        onLikedPostsClick = onLikedPostsClick
+                        onLikedPostsClick = onLikedPostsClick,
+                        onFiltersClick = onFiltersClick
                     )
                 }
 
