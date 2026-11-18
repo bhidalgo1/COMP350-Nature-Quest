@@ -21,6 +21,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.natureobservation.feature.posts.PhotoFeedScreen
+import com.example.naturequesthomescreen.ui.theme.LocalAppearanceSettings
 
 @Composable
 fun HomeScreen(
@@ -55,9 +56,20 @@ fun HomeScreen(
     MaterialTheme(typography = homeTypography) {
         val colors = MaterialTheme.colorScheme
 
+        val hasCustomBackground =
+            LocalAppearanceSettings.current.backgroundArgb != null
+
+        // Use readable heading text on a custom background.
+        val headingColor = if (hasCustomBackground) {
+            colors.onBackground
+        } else {
+            colors.onPrimaryContainer
+        }
+
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             containerColor = colors.background,
+            contentColor = colors.onBackground,
 
             // These actions stay visible while the feed scrolls.
             bottomBar = {
@@ -97,7 +109,7 @@ fun HomeScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             Text(
-                                text = "Upload",
+                                text = "New Post",
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
@@ -110,10 +122,19 @@ fun HomeScreen(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            colors = listOf(
-                                colors.primaryContainer,
-                                colors.background
-                            )
+                            colors = if (hasCustomBackground) {
+                                // Keep the exact background color selected.
+                                listOf(
+                                    colors.background,
+                                    colors.background
+                                )
+                            } else {
+                                // Use the original gradient by default.
+                                listOf(
+                                    colors.primaryContainer,
+                                    colors.background
+                                )
+                            }
                         )
                     )
                     .padding(innerPadding)
@@ -137,13 +158,13 @@ fun HomeScreen(
                         Text(
                             text = "Nature Quest",
                             style = MaterialTheme.typography.headlineLarge,
-                            color = colors.onPrimaryContainer
+                            color = headingColor
                         )
 
                         Text(
                             text = "Explore. Capture. Share.",
                             style = MaterialTheme.typography.bodyLarge,
-                            color = colors.onPrimaryContainer
+                            color = headingColor
                         )
                     }
 
@@ -152,6 +173,9 @@ fun HomeScreen(
                         onProfileClick = onProfileClick
                     )
                 }
+
+                // Light/dark switch and background color picker.
+                AppearanceControls()
 
                 // Give the feed the remaining screen height.
                 // Its own LazyColumn handles scrolling.
