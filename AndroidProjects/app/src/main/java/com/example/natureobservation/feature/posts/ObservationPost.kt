@@ -12,5 +12,6 @@ data class ObservationPost(
     val createdAt: Timestamp? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val isMapPin: Boolean = false
+    val isMapPin: Boolean = false,
+    val organism: String = ""
 )

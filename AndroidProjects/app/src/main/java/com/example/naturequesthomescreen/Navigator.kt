@@ -15,6 +15,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.natureobservation.feature.posts.normalizeOrganisms
 import com.example.viewmodel.AuthenticateVm
 
 @Composable
@@ -103,7 +104,8 @@ fun NavigateToScreen(
                 onMapClick = onMapClick,
                 onUploadClick = onUploadClick,
                 onLikedPostsClick = { toScreen.navigate("liked posts") },
-                onProfileClick = { toScreen.navigate("profile") }
+                onProfileClick = { toScreen.navigate("profile") },
+                onFiltersClick = { toScreen.navigate("filters") }
             )
         }
 
@@ -135,6 +137,26 @@ fun NavigateToScreen(
                         launchSingleTop = true
                     }
                 }
+            )
+        }
+
+        composable("filters") {
+            FiltersScreen(
+                onBack = { toScreen.popBackStack() },
+                onApplyFiltersClick = { categories ->
+                    val selected = normalizeOrganisms(categories)
+                    toScreen.navigate("filtered posts/" + selected.joinToString(","))
+                }
+            )
+        }
+
+        composable("filtered posts/{categories}") { entry ->
+            val selected = normalizeOrganisms(
+                entry.arguments?.getString("categories").orEmpty().split(',').filter { it.isNotBlank() }
+            )
+            FilteredPostsScreen(
+                selectedCategories = selected,
+                onBack = { toScreen.popBackStack() }
             )
         }
 

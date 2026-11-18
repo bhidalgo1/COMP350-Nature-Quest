@@ -13,7 +13,8 @@ import androidx.compose.runtime.*
 @Composable
 fun HomeMenu(
     onLikedPostsClick: () -> Unit,
-    onProfileClick: () -> Unit
+    onProfileClick: () -> Unit,
+    onFiltersClick: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -35,6 +36,13 @@ fun HomeMenu(
                 onClick = {
                     expanded = false
                     onProfileClick()
+                }
+            )
+            DropdownMenuItem(
+                text = { Text("Filter posts") },
+                onClick = {
+                    expanded = false
+                    onFiltersClick()
                 }
             )
             DropdownMenuItem(

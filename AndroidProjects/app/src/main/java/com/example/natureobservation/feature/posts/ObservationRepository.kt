@@ -74,6 +74,7 @@ class ObservationRepository(context: Context) {
                     authorId = authorId,
                     title = title,
                     description = document.getString("description").orEmpty(),
+                    organism = document.getString("organism").orEmpty(),
                     storagePath = document.getString("storagePath").orEmpty(),
                     createdAt = document.getTimestamp("createdAt"),
                     latitude = latitude,
@@ -127,10 +128,12 @@ class ObservationRepository(context: Context) {
         title: String,
         description: String,
         latitude: Double,
-        longitude: Double
+        longitude: Double,
+        organism: String = ""
     ): String {
         val cleanTitle = title.trim().ifBlank { "Map Pin Observation" }
         val cleanDescription = description.trim()
+        require(organism.isEmpty() || organism in ORGANISM_CATEGORIES) { "Choose a supported category." }
         val uid = try { ensureSignedIn() } catch (_: Exception) { "user_${UUID.randomUUID().toString().take(8)}" }
         val postId = UUID.randomUUID().toString()
 
@@ -139,6 +142,7 @@ class ObservationRepository(context: Context) {
             authorId = uid,
             title = cleanTitle,
             description = cleanDescription,
+            organism = organism,
             storagePath = "",
             createdAt = Timestamp.now(),
             latitude = latitude,
@@ -153,6 +157,7 @@ class ObservationRepository(context: Context) {
                 "authorId" to uid,
                 "title" to cleanTitle,
                 "description" to cleanDescription,
+                "organism" to organism,
                 "storagePath" to "",
                 "latitude" to latitude,
                 "longitude" to longitude,
@@ -177,10 +182,12 @@ class ObservationRepository(context: Context) {
         photoZoom: Float = 1f,
         photoPanX: Float = 0f,
         photoPanY: Float = 0f,
+        organism: String = "",
         onProgress: (Float) -> Unit
     ): String {
         val cleanTitle = title.trim()
         val cleanDescription = description.trim()
+        require(organism.isEmpty() || organism in ORGANISM_CATEGORIES) { "Choose a supported category." }
         require(cleanTitle.isNotEmpty() && cleanTitle.length <= 100) {
             "Enter a title (up to 100 characters)."
         }
@@ -267,6 +274,7 @@ class ObservationRepository(context: Context) {
                     "authorId" to uid,
                     "title" to cleanTitle,
                     "description" to cleanDescription,
+                    "organism" to organism,
                     "storagePath" to storagePath,
                     "createdAt" to FieldValue.serverTimestamp()
                 )
@@ -347,16 +355,20 @@ class ObservationRepository(context: Context) {
     /** Feed updates automatically whenever an observation is published. */
     fun observeFeed(
         onUpdate: (List<ObservationPost>) -> Unit,
-        onError: (Exception) -> Unit
+        onError: (Exception) -> Unit,
+        organisms: List<String> = emptyList()
     ): ListenerRegistration {
+        val selected = normalizeOrganisms(organisms)
         var lastRemotePosts = emptyList<ObservationPost>()
+        var hasRemoteSnapshot = false
 
         fun emitCombined() {
             val local = getLocalPosts()
             val combined = (local + lastRemotePosts)
+                .filter { selected.isEmpty() || it.organism in selected }
                 .distinctBy { it.id }
                 .sortedByDescending { it.createdAt?.seconds ?: Long.MAX_VALUE }
-            onUpdate(combined)
+            if (hasRemoteSnapshot || combined.isNotEmpty()) onUpdate(combined)
         }
 
         val listener = {
@@ -369,36 +381,43 @@ class ObservationRepository(context: Context) {
         emitCombined()
 
         val firestoreRegistration = try {
-            db.collection("observations")
-                .orderBy("createdAt", Query.Direction.DESCENDING)
-                .limit(40)
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null) {
-                        onError(error)
-                        emitCombined()
-                    } else if (snapshot != null) {
-                        lastRemotePosts = snapshot.documents.mapNotNull { document ->
-                            val author = document.getString("authorId") ?: return@mapNotNull null
-                            val title = document.getString("title") ?: return@mapNotNull null
-                            val lat = document.getDouble("latitude")
-                            val lng = document.getDouble("longitude")
-                            val isPin = document.getBoolean("isMapPin") ?: (lat != null && lng != null)
-                            ObservationPost(
-                                id = document.id,
-                                authorId = author,
-                                title = title,
-                                description = document.getString("description").orEmpty(),
-                                storagePath = document.getString("storagePath").orEmpty(),
-                                createdAt = document.getTimestamp("createdAt"),
-                                latitude = lat,
-                                longitude = lng,
-                                isMapPin = isPin
-                            )
-                        }
-                        emitCombined()
+            val collection = db.collection("observations")
+            val query: Query = if (selected.isEmpty()) {
+                collection.orderBy("createdAt", Query.Direction.DESCENDING).limit(40)
+            } else {
+                // One server query for all selected categories. Sort the results
+                // locally to avoid requiring a new composite index.
+                collection.whereIn("organism", selected)
+            }
+            query.addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(error)
+                } else if (snapshot != null) {
+                    hasRemoteSnapshot = true
+                    lastRemotePosts = snapshot.documents.mapNotNull { document ->
+                        val author = document.getString("authorId") ?: return@mapNotNull null
+                        val title = document.getString("title") ?: return@mapNotNull null
+                        val lat = document.getDouble("latitude")
+                        val lng = document.getDouble("longitude")
+                        val isPin = document.getBoolean("isMapPin") ?: (lat != null && lng != null)
+                        ObservationPost(
+                            id = document.id,
+                            authorId = author,
+                            title = title,
+                            description = document.getString("description").orEmpty(),
+                            organism = document.getString("organism").orEmpty(),
+                            storagePath = document.getString("storagePath").orEmpty(),
+                            createdAt = document.getTimestamp("createdAt"),
+                            latitude = lat,
+                            longitude = lng,
+                            isMapPin = isPin
+                        )
                     }
+                    emitCombined()
                 }
-        } catch (_: Exception) {
+            }
+        } catch (failure: Exception) {
+            onError(failure)
             null
         }
 
