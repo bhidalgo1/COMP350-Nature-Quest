@@ -11,7 +11,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 
 @Composable
-fun HomeMenu(onLikedPostsClick: () -> Unit, onFiltersClick: () -> Unit) {
+fun HomeMenu(
+    onLikedPostsClick: () -> Unit,
+    onProfileClick: () -> Unit,
+    onFiltersClick: () -> Unit
+) {
     var expanded by remember { mutableStateOf(false) }
 
     Box {
@@ -20,13 +24,20 @@ fun HomeMenu(onLikedPostsClick: () -> Unit, onFiltersClick: () -> Unit) {
                 imageVector = Icons.Default.Menu,
                 contentDescription = "Open menu",
 
-            )
+                )
         }
 
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false }
         ) {
+            DropdownMenuItem(
+                text = { Text("My profile") },
+                onClick = {
+                    expanded = false
+                    onProfileClick()
+                }
+            )
             DropdownMenuItem(
                 text = { Text("Filter posts") },
                 onClick = {

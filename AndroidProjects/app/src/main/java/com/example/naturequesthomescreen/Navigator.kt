@@ -1,7 +1,16 @@
 package com.example.naturequesthomescreen
 
+import android.widget.Toast
+import com.example.useraccount.PublicProfileRepository
+import kotlinx.coroutines.CancellationException
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -15,33 +24,42 @@ fun NavigateToScreen(
     onUploadClick: () -> Unit
 ) {
     val toScreen = rememberNavController()
-    // Share the same authentication state with both forms.
+    val context = LocalContext.current
     val authVm: AuthenticateVm = viewModel()
+    var profileNotice by rememberSaveable { mutableStateOf<String?>(null) }
     val startingScreen = remember {
         if (authVm.isUserLoggedIn()) "main screen" else "login"
     }
 
-    fun openHome() {
+    fun finishAuthentication(destination: String) {
         authVm.resetState()
-        toScreen.navigate("main screen") {
-            // Back from home should not reopen a completed sign-in form.
-            popUpTo("login") { inclusive = true }
+        toScreen.navigate(destination) {
+            // Discard forms and the previous account's navigation history.
+            popUpTo(toScreen.graph.id) { inclusive = true }
             launchSingleTop = true
         }
     }
 
-    NavHost(
-        navController = toScreen,
-        startDestination = startingScreen
-    ) {
+    NavHost(navController = toScreen, startDestination = startingScreen) {
         composable("login") {
+            val canGoBack = toScreen.previousBackStackEntry != null
             LoginScreen(
                 onRegisterClick = {
                     authVm.resetState()
                     toScreen.navigate("sign up") { launchSingleTop = true }
                 },
-                onLoginSuccess = { openHome() },
-                viewModel = authVm
+                onLoginSuccess = {
+                    profileNotice = null
+                    finishAuthentication("main screen")
+                },
+                viewModel = authVm,
+                onBack = if (canGoBack) {
+                    {
+                        authVm.resetState()
+                        toScreen.popBackStack()
+                        //Unit
+                    }
+                } else null
             )
         }
 
@@ -49,20 +67,76 @@ fun NavigateToScreen(
             RegisterScreen(
                 onLoginClick = {
                     authVm.resetState()
-                    toScreen.popBackStack("login", inclusive = false)
+                    if (!toScreen.popBackStack("login", inclusive = false)) {
+                        toScreen.navigate("login") {
+                            popUpTo("sign up") { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
                 },
-                onRegisterSuccess = { openHome() },
-                viewModel = authVm
+                onRegisterSuccess = {
+                    profileNotice = authVm.authState.value.notice
+                        ?: "Account created successfully!"
+                    Toast.makeText(context, "Account created successfully!", Toast.LENGTH_LONG).show()
+                    finishAuthentication("profile")
+                },
+                viewModel = authVm,
+                onBack = {
+                    authVm.resetState()
+                    toScreen.popBackStack()
+                }
             )
         }
 
         composable("main screen") {
+            // Backfill this account's author details when an existing user returns.
+            LaunchedEffect(Unit) {
+                try {
+                    PublicProfileRepository().syncCurrentUser()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // My profile exposes the error and provides a Refresh action.
+                }
+            }
             HomeScreen(
                 onCameraClick = { toScreen.navigate("camera") },
                 onMapClick = onMapClick,
                 onUploadClick = onUploadClick,
                 onLikedPostsClick = { toScreen.navigate("liked posts") },
+                onProfileClick = { toScreen.navigate("profile") },
                 onFiltersClick = { toScreen.navigate("filters") }
+            )
+        }
+
+        composable("profile") {
+            ProfileScreen(
+                notice = profileNotice,
+                onDismissNotice = { profileNotice = null },
+                onBack = {
+                    if (!toScreen.popBackStack()) {
+                        toScreen.navigate("main screen") {
+                            popUpTo(toScreen.graph.id) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                },
+                onRegisterClick = {
+                    authVm.resetState()
+                    toScreen.navigate("sign up")
+                },
+                onLoginClick = {
+                    authVm.resetState()
+                    toScreen.navigate("login")
+                },
+                onLogout = {
+                    authVm.logout()
+                    profileNotice = null
+                    toScreen.navigate("login") {
+                        popUpTo(toScreen.graph.id) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
             )
         }
 

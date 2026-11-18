@@ -29,6 +29,7 @@ fun HomeScreen(
     onMapClick: () -> Unit,
     onUploadClick: () -> Unit,
     onLikedPostsClick: () -> Unit,
+    onProfileClick: () -> Unit,
     onFiltersClick: () -> Unit,
 ) {
     // These font changes apply to the home screen and its feed.
@@ -170,6 +171,7 @@ fun HomeScreen(
 
                     HomeMenu(
                         onLikedPostsClick = onLikedPostsClick,
+                        onProfileClick = onProfileClick,
                         onFiltersClick = onFiltersClick
                     )
                 }

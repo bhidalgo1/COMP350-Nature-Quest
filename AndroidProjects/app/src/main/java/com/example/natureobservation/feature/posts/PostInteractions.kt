@@ -1,5 +1,7 @@
 package com.example.natureobservation.feature.posts
 
+import com.example.naturequesthomescreen.ui.components.AuthorHeader
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -320,7 +322,10 @@ fun PostInteractions(observation: ObservationPost, onDeleted: () -> Unit = {}) {
             }
             comments.forEach { comment ->
                 key(comment.id) {
-                    Text("${comment.authorId.take(8)}: ${comment.text}")
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        AuthorHeader(authorId = comment.authorId, prefix = "", avatarSize = 24.dp)
+                        Text(comment.text, modifier = Modifier.padding(start = 32.dp))
+                    }
                 }
             }
             if (comments.size == 50) Text("Showing the newest 50 comments.")

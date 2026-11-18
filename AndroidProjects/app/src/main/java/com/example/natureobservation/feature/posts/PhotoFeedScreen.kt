@@ -1,5 +1,6 @@
 package com.example.natureobservation.feature.posts
 
+import com.example.naturequesthomescreen.ui.components.AuthorHeader
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import android.content.Intent
@@ -211,15 +212,11 @@ fun PhotoFeedScreen(
                                 }
                             }
                         }
-
                         if (post.organism.isNotBlank()) {
                             Text("Category: ${post.organism}", style = MaterialTheme.typography.labelSmall)
                         }
 
-                        Text(
-                            text = "Posted by ${post.authorId.take(8)}",
-                            style = MaterialTheme.typography.labelSmall
-                        )
+                        AuthorHeader(authorId = post.authorId)
                         PostInteractions(observation = post)
                     }
                 }
