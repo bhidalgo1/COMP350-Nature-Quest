@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signed() { return request.auth != null; }
+    function own(uid) { return signed() && request.auth.uid == uid; }
+    function blockPath(a, b) {
+      return /databases/$(database)/documents/social/$(a)/blocks/$(b);
+    }
+    function followPath(a, b) {
+      return /databases/$(database)/documents/social/$(a)/following/$(b);
+    }
+    function visible(author) {
+      return signed() && (own(author) || (!exists(blockPath(author, request.auth.uid))
+        && !exists(blockPath(request.auth.uid, author))));
+    }
+    function edgeData(a, b) {
+      return request.resource.data.keys().hasOnly(['source','target'])
+        && request.resource.data.source == a && request.resource.data.target == b && a != b;
+    }
+    match /users/{uid} { allow read, write: if own(uid); }
+    match /publicProfiles/{uid} {
+      allow read: if signed();
+      allow create, update: if own(uid)
+        && request.resource.data.keys().hasOnly(['username','photoPath','bio'])
+        && request.resource.data.get('username','') is string
+        && request.resource.data.get('bio','') is string && request.resource.data.get('bio','').size() <= 300
+        && (request.resource.data.get('photoPath','') == '' ||
+            request.resource.data.photoPath.matches('profile_photos/' + uid + '/[a-zA-Z0-9-]+[.]jpg'));
+    }
+    match /social/{a}/following/{b} {
+      allow get: if own(a) || own(b);
+      allow list: if own(a);
+      allow create, update: if own(a) && edgeData(a,b) && visible(b)
+        && !existsAfter(blockPath(a,b)) && !existsAfter(blockPath(b,a));
+      allow delete: if own(a) || own(b);
+    }
+    match /social/{a}/blocks/{b} {
+      allow get: if own(a) || own(b);
+      allow list: if own(a);
+      allow create, update: if own(a) && edgeData(a,b)
+        && !existsAfter(followPath(a,b)) && !existsAfter(followPath(b,a));
+      allow delete: if own(a);
+    }
+    match /{path=**}/blocks/{id} { allow list: if own(resource.data.target); }
+    match /{path=**}/following/{id} { allow list: if own(resource.data.target); }
+    match /directMessages/{id} {
+      allow read: if own(resource.data.sender) || own(resource.data.recipient);
+      allow create: if own(request.resource.data.sender)
+        && request.resource.data.keys().hasOnly(['sender','recipient','text','createdAt'])
+        && request.resource.data.recipient is string && request.resource.data.recipient != request.auth.uid
+        && exists(/databases/$(database)/documents/publicProfiles/$(request.resource.data.recipient))
+        && visible(request.resource.data.recipient)
+        && !existsAfter(blockPath(request.auth.uid,request.resource.data.recipient))
+        && request.resource.data.text is string && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 2000 && request.resource.data.createdAt == request.time;
+    }
+    match /observations/{post} {
+      function validPost(d) {
+        let path = d.get('storagePath','');
+        let pin = d.get('isMapPin',false);
+        return d.keys().hasOnly(['authorId','title','description','organism','storagePath','latitude','longitude','isMapPin','createdAt'])
+          && d.title is string && d.title.size() > 0 && d.title.size() <= 100
+          && d.get('description','') is string && d.get('description','').size() <= 1000
+          && d.get('organism','') in ['','Plant','Mammal','Bird','Reptile','Insect']
+          && (path == '' || path.matches('observation_photos/' + request.auth.uid + '/[^/]+'))
+          && (path != '' || pin)
+          && ((!pin && !d.keys().hasAny(['latitude','longitude'])) ||
+             (pin && d.latitude is number && d.longitude is number && d.latitude >= -90 &&
+              d.latitude <= 90 && d.longitude >= -180 && d.longitude <= 180));
+      }
+      allow read: if visible(resource.data.authorId);
+      allow create: if own(request.resource.data.authorId) && validPost(request.resource.data)
+        && request.resource.data.createdAt == request.time;
+      allow update: if own(resource.data.authorId) && validPost(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title','description','storagePath']);
+      allow delete: if own(resource.data.authorId);
+      function canReadParent() {
+        return visible(get(/databases/$(database)/documents/observations/$(post)).data.authorId);
+      }
+      match /{reaction}/{uid} {
+        allow read: if reaction in ['likes','dislikes'] && canReadParent();
+        allow create: if reaction in ['likes','dislikes'] && own(uid) && canReadParent()
+          && request.resource.data.keys().hasOnly(['createdAt']) && request.resource.data.createdAt == request.time;
+        allow delete: if reaction in ['likes','dislikes'] && own(uid) && canReadParent();
+      }
+      match /comments/{id} {
+        allow read: if canReadParent();
+        allow create: if own(request.resource.data.authorId) && canReadParent()
+          && request.resource.data.keys().hasOnly(['authorId','text','createdAt'])
+          && request.resource.data.text is string && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500 && request.resource.data.createdAt == request.time;
+      }
+    }
+  }
+}

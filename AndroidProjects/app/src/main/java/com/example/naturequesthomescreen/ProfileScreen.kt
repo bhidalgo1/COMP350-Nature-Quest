@@ -10,8 +10,6 @@ import com.example.naturequesthomescreen.ui.components.ProfileAvatar
 import com.example.naturequesthomescreen.ui.components.rememberAuthorProfile
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +27,7 @@ fun ProfileScreen(
     onLogout: () -> Unit,
     onRegisterClick: () -> Unit,
     onLoginClick: () -> Unit,
+    onViewPosts: () -> Unit,
     notice: String? = null,
     onDismissNotice: () -> Unit = {}
 ) {
@@ -59,7 +58,7 @@ fun ProfileScreen(
                 } catch (failure: Exception) {
                     if (failure is CancellationException && failure !is TimeoutCancellationException) throw failure
                     photoError = "Could not save your picture. " +
-                        (failure.localizedMessage ?: "Please try again.")
+                            (failure.localizedMessage ?: "Please try again.")
                 } finally {
                     photoBusy = false
                 }
@@ -106,7 +105,7 @@ fun ProfileScreen(
             } catch (failure: Exception) {
                 if (failure is CancellationException && failure !is TimeoutCancellationException) throw failure
                 publicProfileError = "Could not publish your author details. " +
-                    (failure.localizedMessage ?: "Please try Refresh.")
+                        (failure.localizedMessage ?: "Please try Refresh.")
             }
         }
         countLoading = true
@@ -146,27 +145,18 @@ fun ProfileScreen(
         )
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .verticalScroll(rememberScrollState())
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            TextButton(onClick = onBack, enabled = !photoBusy) { Text("Home") }
-            TextButton(
+    ProfileLayout(
+        onBack = onBack,
+        backLabel = "Home",
+        backEnabled = !photoBusy,
+        actions = {
+            FilledTonalButton(
                 onClick = { refreshKey++ },
                 enabled = userId != null && !photoBusy && !usernameLoading && !countLoading
             ) { Text("Refresh") }
         }
-
-        Text("My profile", style = MaterialTheme.typography.headlineMedium)
+    ) {
+        ProfileHeading("My profile")
 
         if (notice != null) {
             Card(modifier = Modifier.fillMaxWidth()) {
@@ -177,82 +167,98 @@ fun ProfileScreen(
             }
         }
 
-        ProfileAvatar(photoPath = publicProfile.photoPath, size = 112.dp, refreshKey = refreshKey)
-
-        if (userId != null) {
-            OutlinedButton(
-                enabled = !photoBusy,
-                onClick = {
-                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                }
+        ProfileCard {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(if (publicProfile.photoPath.isBlank()) "Add profile picture" else "Change profile picture")
+                ProfileAvatar(photoPath = publicProfile.photoPath, size = 80.dp, refreshKey = refreshKey)
+                Text(
+                    text = when {
+                        userId == null -> "Please log in"
+                        isGuest -> "Guest"
+                        username.isNotBlank() -> username
+                        usernameLoading -> "Loading username..."
+                        else -> "Username unavailable"
+                    },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
             }
-            if (publicProfile.photoPath.isNotBlank()) {
-                TextButton(
+            if (userId != null) {
+                FilledTonalButton(
+                    modifier = Modifier.fillMaxWidth(),
                     enabled = !photoBusy,
                     onClick = {
-                        photoBusy = true
-                        photoError = null
-                        scope.launch {
-                            try {
-                                publicRepository.removePhoto()
-                                publicProfileError = null
-                            } catch (failure: Exception) {
-                                if (failure is CancellationException && failure !is TimeoutCancellationException) throw failure
-                                photoError = "Could not remove your picture. " +
-                                    (failure.localizedMessage ?: "Please try again.")
-                            } finally {
-                                photoBusy = false
+                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    }
+                ) {
+                    Text(if (publicProfile.photoPath.isBlank()) "Add profile picture" else "Change profile picture")
+                }
+                if (publicProfile.photoPath.isNotBlank()) {
+                    TextButton(
+                        enabled = !photoBusy,
+                        onClick = {
+                            photoBusy = true
+                            photoError = null
+                            scope.launch {
+                                try {
+                                    publicRepository.removePhoto()
+                                    publicProfileError = null
+                                } catch (failure: Exception) {
+                                    if (failure is CancellationException && failure !is TimeoutCancellationException) throw failure
+                                    photoError = "Could not remove your picture. " +
+                                            (failure.localizedMessage ?: "Please try again.")
+                                } finally {
+                                    photoBusy = false
+                                }
                             }
                         }
-                    }
-                ) { Text("Remove picture") }
+                    ) { Text("Remove picture") }
+                }
+                if (photoBusy) {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    Text("Saving picture...")
+                }
+                photoError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                publicProfileError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
-            if (photoBusy) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                Text("Saving picture...")
-            }
-            photoError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            publicProfileError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
 
-        Text(
-            text = when {
-                userId == null -> "Please log in"
-                isGuest -> "Guest"
-                username.isNotBlank() -> username
-                usernameLoading -> "Loading username..."
-                else -> "Username unavailable"
-            },
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold
-        )
         usernameError?.let {
             Text(it, color = MaterialTheme.colorScheme.error)
         }
 
         if (userId != null) {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+            ProfileCard {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Text("Posts", style = MaterialTheme.typography.titleMedium)
                     if (countLoading) {
-                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
+                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
                     } else {
                         Text(
                             text = postCount?.toString() ?: "Unavailable",
-                            style = MaterialTheme.typography.headlineLarge
+                            style = MaterialTheme.typography.titleLarge
                         )
                     }
-                    Text("Posts", style = MaterialTheme.typography.titleMedium)
-                    Text("Saved posts, including map pins.", style = MaterialTheme.typography.bodySmall)
+                }
+                FilledTonalButton(
+                    onClick = onViewPosts,
+                    enabled = !photoBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("View my posts")
                 }
             }
             countError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
+
+        if (userId != null) OwnSocialSection(userId, publicProfile.bio)
 
         when {
             userId == null -> Button(onClick = onLoginClick) { Text("Log in") }

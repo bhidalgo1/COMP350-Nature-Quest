@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.PickVisualMediaRequest
 import android.content.Intent
+import androidx.compose.material3.MaterialTheme
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.foundation.Image
@@ -23,7 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.MaterialTheme
+import com.example.naturequesthomescreen.ui.theme.NatureQuestHomeScreenTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
@@ -68,7 +69,7 @@ class PhotoUploadActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setContent {
-            MaterialTheme {
+            NatureQuestHomeScreenTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val feedPostId = intent.getStringExtra(EXTRA_FEED_POST_ID)
                     var page by rememberSaveable {

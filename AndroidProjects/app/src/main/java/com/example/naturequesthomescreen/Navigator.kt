@@ -15,6 +15,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.natureobservation.feature.posts.PhotoFeedScreen
 import com.example.natureobservation.feature.posts.normalizeOrganisms
 import com.example.viewmodel.AuthenticateVm
 
@@ -112,6 +113,7 @@ fun NavigateToScreen(
         composable("profile") {
             ProfileScreen(
                 notice = profileNotice,
+                onViewPosts = { toScreen.navigate("my posts") { launchSingleTop = true } },
                 onDismissNotice = { profileNotice = null },
                 onBack = {
                     if (!toScreen.popBackStack()) {
@@ -138,6 +140,15 @@ fun NavigateToScreen(
                     }
                 }
             )
+        }
+
+        composable("my posts") {
+            ProfileLayout(
+                onBack = { toScreen.popBackStack() },
+                scrollContent = false
+            ) {
+                PhotoFeedScreen(ownPostsOnly = true)
+            }
         }
 
         composable("filters") {

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="map_background">#171320</color>
+    <color name="map_frame">#211B2C</color>
+    <color name="map_frame_border">#4D3C64</color>
+    <color name="map_details">#261E34</color>
+    <color name="map_details_border">#55426E</color>
+    <color name="map_title">#F0E7FF</color>
+    <color name="map_description">#D0BCE8</color>
+    <color name="map_back_button">#4F356F</color>
+    <color name="map_primary_button">#654689</color>
+    <color name="map_secondary_button">#51406A</color>
+</resources>

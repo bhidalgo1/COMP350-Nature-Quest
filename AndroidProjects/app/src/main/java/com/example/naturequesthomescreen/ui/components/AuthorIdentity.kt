@@ -1,6 +1,7 @@
 package com.example.naturequesthomescreen.ui.components
 
 import android.util.LruCache
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -55,7 +56,8 @@ private object AuthorDirectory {
                     entry.profile.value = PublicProfile(
                         username = snapshot.getString("username")?.takeIf { it.isNotBlank() }
                             ?: "Nature explorer",
-                        photoPath = snapshot.getString("photoPath").orEmpty()
+                        photoPath = snapshot.getString("photoPath").orEmpty(),
+                        bio = snapshot.getString("bio").orEmpty()
                     )
                 }
             }
@@ -136,7 +138,11 @@ fun ProfileAvatar(photoPath: String, size: Dp = 32.dp, refreshKey: Int = 0) {
 @Composable
 fun AuthorHeader(authorId: String, prefix: String = "Posted by ", avatarSize: Dp = 32.dp) {
     val author by rememberAuthorProfile(authorId)
+    val context = LocalContext.current
     Row(
+        modifier = Modifier.clickable(enabled = authorId.isNotBlank()) {
+            com.example.naturequesthomescreen.SocialActivity.open(context, "profile", authorId)
+        },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {

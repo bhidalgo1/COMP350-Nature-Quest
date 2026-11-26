@@ -1,7 +1,10 @@
 package com.example.naturequesthomescreen
 
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import android.Manifest
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Bundle
@@ -12,8 +15,12 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
 import com.example.natureobservation.feature.posts.ObservationRepository
+import com.example.naturequesthomescreen.ui.theme.appearancePreferences
+import com.example.naturequesthomescreen.ui.theme.savedDarkMode
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
 import com.google.android.gms.maps.OnMapReadyCallback
@@ -21,6 +28,7 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.Marker
 import com.google.android.gms.maps.model.MarkerOptions
+import com.google.android.gms.maps.model.MapStyleOptions
 import com.google.android.gms.maps.model.TileOverlay
 import com.google.android.gms.maps.model.TileOverlayOptions
 import com.google.maps.android.heatmaps.Gradient
@@ -77,9 +85,27 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
+    private fun applyAppearanceMode() {
+        val mode = when (appearancePreferences(this).savedDarkMode()) {
+            true -> AppCompatDelegate.MODE_NIGHT_YES
+            false -> AppCompatDelegate.MODE_NIGHT_NO
+            null -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+        }
+        if (delegate.localNightMode != mode) delegate.localNightMode = mode
+    }
+
+    private fun isMapDark(): Boolean =
+        (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyAppearanceMode()
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_maps)
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !isMapDark()
+            isAppearanceLightNavigationBars = !isMapDark()
+        }
 
         pickingLocation = intent.getBooleanExtra(EXTRA_PICK_LOCATION, false)
         initialTargetLocation = readLocation(intent)
@@ -135,8 +161,17 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        applyAppearanceMode()
+    }
+
     override fun onMapReady(map: GoogleMap) {
         googleMap = map
+
+        if (isMapDark()) {
+            map.setMapStyle(MapStyleOptions.loadRawResourceStyle(this, R.raw.map_style_dark))
+        }
 
         enableMyLocation()
 
@@ -205,98 +240,78 @@ class MapActivity : AppCompatActivity(), OnMapReadyCallback {
             showSelectedLocation(point)
         }
 
-        if (initialTargetLocation != null) {
-            val target = initialTargetLocation!!
-            val targetTitle = intent.getStringExtra("pin_title")?.ifBlank { null }
-            val targetDescription = intent.getStringExtra("pin_description")?.ifBlank { null }
-
-            val title = targetTitle ?: "User Pin"
-            val snippet = targetDescription ?: String.format(
-                Locale.US,
-                "%.5f, %.5f",
-                target.latitude,
-                target.longitude
-            )
-
-            val marker = googleMap.addMarker(
-                MarkerOptions()
-                    .position(target)
-                    .title(title)
-                    .snippet(snippet)
-                    .draggable(true)
-            )
-            if (marker != null) {
-                userMarkers.add(marker)
-                marker.showInfoWindow()
-                showPin(marker)
+        lifecycleScope.launch {
+            try {
+                repository.ensureSignedIn()
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) {
+                Toast.makeText(this@MapActivity, "Could not load map posts.", Toast.LENGTH_SHORT).show()
+                return@launch
             }
-        }
-
-        googleMap.setOnMarkerDragListener(
-            object : GoogleMap.OnMarkerDragListener {
-                override fun onMarkerDragStart(marker: Marker) {}
-
-                override fun onMarkerDrag(marker: Marker) {
-                    showPin(marker)
-                }
-
-                override fun onMarkerDragEnd(marker: Marker) {
-                    showPin(marker)
-                }
-            }
-        )
-
-        // Sync feed items to map
-        repository.observeFeed(
-            onUpdate = { posts ->
-                val targetId = intent.getStringExtra("pin_id")
-                posts.forEach { post ->
-                    val lat = post.latitude
-                    val lng = post.longitude
-                    if (lat != null && lng != null) {
-                        val pos = LatLng(lat, lng)
-                        val existingMarker = userMarkers.find {
-                            it.position.latitude == lat && it.position.longitude == lng
-                        }
-                        if (existingMarker != null) {
-                            existingMarker.title = post.title
-                            if (post.description.isNotBlank()) {
-                                existingMarker.snippet = post.description
+            feedRegistration = repository.observeFeed(
+                onUpdate = { posts ->
+                    val targetId = intent.getStringExtra("pin_id")
+                    val visibleIds = posts.mapTo(mutableSetOf()) { it.id }
+                    val removed = userMarkers.filter { (it.tag as? String) !in visibleIds }
+                    if (removed.isNotEmpty()) showCampus()
+                    removed.forEach { it.remove() }
+                    userMarkers.removeAll(removed.toSet())
+                    posts.forEach { post ->
+                        val lat = post.latitude
+                        val lng = post.longitude
+                        if (lat != null && lng != null) {
+                            val pos = LatLng(lat, lng)
+                            val existingMarker = userMarkers.find {
+                                it.tag == post.id
                             }
-                            if (targetId == post.id || (initialTargetLocation != null &&
-                                        initialTargetLocation!!.latitude == lat &&
-                                        initialTargetLocation!!.longitude == lng)) {
-                                existingMarker.showInfoWindow()
-                                showPin(existingMarker)
-                            }
-                        } else {
-                            val marker = googleMap.addMarker(
-                                MarkerOptions()
-                                    .position(pos)
-                                    .title(post.title)
-                                    .snippet(post.description.ifBlank {
-                                        String.format(Locale.US, "%.5f, %.5f", lat, lng)
-                                    })
-                                    .draggable(true)
-                            )
-                            if (marker != null) {
-                                userMarkers.add(marker)
+                            if (existingMarker != null) {
+                                existingMarker.title = post.title
+                                if (post.description.isNotBlank()) {
+                                    existingMarker.snippet = post.description
+                                }
                                 if (targetId == post.id || (initialTargetLocation != null &&
                                             initialTargetLocation!!.latitude == lat &&
                                             initialTargetLocation!!.longitude == lng)) {
-                                    marker.showInfoWindow()
-                                    showPin(marker)
+                                    existingMarker.showInfoWindow()
+                                    showPin(existingMarker)
+                                }
+                            } else {
+                                val marker = googleMap.addMarker(
+                                    MarkerOptions()
+                                        .position(pos)
+                                        .title(post.title)
+                                        .snippet(post.description.ifBlank {
+                                            String.format(Locale.US, "%.5f, %.5f", lat, lng)
+                                        })
+                                        .draggable(true)
+                                )
+                                if (marker != null) {
+                                    marker.tag = post.id
+                                    userMarkers.add(marker)
+                                    if (targetId == post.id || (initialTargetLocation != null &&
+                                                initialTargetLocation!!.latitude == lat &&
+                                                initialTargetLocation!!.longitude == lng)) {
+                                        marker.showInfoWindow()
+                                        showPin(marker)
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                if (isHeatmapEnabled) {
-                    refreshHeatmap()
-                }
-            },
-            onError = {}
-        )
+                    if (isHeatmapEnabled) {
+                        refreshHeatmap()
+                    }
+                },
+                onError = {}
+            )
+        }
+    }
+
+    private var feedRegistration: com.google.firebase.firestore.ListenerRegistration? = null
+
+    override fun onDestroy() {
+        feedRegistration?.remove()
+        super.onDestroy()
     }
 
     private fun enableMyLocation() {
