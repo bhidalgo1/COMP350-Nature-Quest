@@ -2,7 +2,7 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5EFFF"
+    android:background="@color/map_background"
     android:orientation="vertical"
     android:padding="16dp">
 
@@ -52,7 +52,7 @@
             android:id="@+id/placeTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#33195C"
+            android:textColor="@color/map_title"
             android:textSize="18sp"
             android:textStyle="bold" />
 
@@ -61,7 +61,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:textColor="#5B3E8C"
+            android:textColor="@color/map_description"
             android:textSize="13sp" />
 
     </LinearLayout>

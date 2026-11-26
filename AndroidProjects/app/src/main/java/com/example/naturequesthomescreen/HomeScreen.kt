@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,11 +18,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.natureobservation.feature.posts.PhotoFeedScreen
-import com.example.naturequesthomescreen.ui.theme.LocalAppearanceSettings
+import com.example.naturequesthomescreen.ui.theme.hasCustomAppearanceBackground
 
 @Composable
 fun HomeScreen(
@@ -32,6 +34,8 @@ fun HomeScreen(
     onProfileClick: () -> Unit,
     onFiltersClick: () -> Unit,
 ) {
+    val context = LocalContext.current
+
     // These font changes apply to the home screen and its feed.
     val homeTypography = MaterialTheme.typography.copy(
         headlineLarge = MaterialTheme.typography.headlineLarge.copy(
@@ -58,7 +62,7 @@ fun HomeScreen(
         val colors = MaterialTheme.colorScheme
 
         val hasCustomBackground =
-            LocalAppearanceSettings.current.backgroundArgb != null
+            hasCustomAppearanceBackground()
 
         // Use readable heading text on a custom background.
         val headingColor = if (hasCustomBackground) {
@@ -82,12 +86,12 @@ fun HomeScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(
                             onClick = onCameraClick,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
                         ) {
                             Text(
                                 text = "Camera",
@@ -97,7 +101,8 @@ fun HomeScreen(
 
                         TextButton(
                             onClick = onMapClick,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
                         ) {
                             Text(
                                 text = "Map",
@@ -107,12 +112,21 @@ fun HomeScreen(
 
                         TextButton(
                             onClick = onUploadClick,
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
                         ) {
                             Text(
                                 text = "New Post",
                                 fontWeight = FontWeight.SemiBold
                             )
+                        }
+
+                        TextButton(
+                            onClick = { SocialActivity.open(context, "Messages") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Messages", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

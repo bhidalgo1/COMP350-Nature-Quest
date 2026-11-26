@@ -16,6 +16,7 @@ import com.example.natureobservation.feature.posts.ObservationPost
 import com.example.natureobservation.feature.posts.ObservationRepository
 import com.example.natureobservation.feature.posts.PostInteractions
 import com.example.natureobservation.feature.posts.rememberRemotePhotoBitmap
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
 @Composable
@@ -34,20 +35,35 @@ fun LikedPostsScreen(onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var reloadKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(repository, reloadKey) {
+    var visible by remember { mutableStateOf<List<ObservationPost>?>(null) }
+    val scope = rememberCoroutineScope()
+    DisposableEffect(repository, reloadKey) {
+        visible = null
+        posts = emptyList()
         loading = true
         error = null
-
-        try {
-            posts = repository.getLikedPosts()
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (failure: Exception) {
-            error = failure.localizedMessage
-                ?: "Could not load liked posts."
-        } finally {
-            loading = false
+        var registration: com.google.firebase.firestore.ListenerRegistration? = null
+        val job = scope.launch {
+            try {
+                repository.ensureSignedIn()
+                registration = repository.observeFeed(onUpdate = { current ->
+                    val ids = current.mapTo(mutableSetOf()) { it.id }
+                    posts = posts.filter { it.id in ids }
+                    visible = current
+                }, onError = { error = it.localizedMessage; loading = false }, allPosts = true)
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.localizedMessage; loading = false }
         }
+        onDispose { job.cancel(); registration?.remove() }
+    }
+    LaunchedEffect(visible, reloadKey) {
+        val candidates = visible ?: return@LaunchedEffect
+        try {
+            val uid = repository.ensureSignedIn()
+            posts = candidates.filter { repository.isLiked(it.id, uid) }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = e.localizedMessage }
+        finally { loading = false }
     }
 
     Column(

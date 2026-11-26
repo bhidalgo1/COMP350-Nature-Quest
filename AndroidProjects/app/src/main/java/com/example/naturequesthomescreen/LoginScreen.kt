@@ -86,11 +86,12 @@ fun LoginScreen(
             Box(
                 modifier = Modifier
                     .size(200.dp)
-                    .background(MaterialTheme.colorScheme.onPrimary),
+                    .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     "Welcome to Nature Quest",
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.ExtraBold,
                     textAlign = TextAlign.Center

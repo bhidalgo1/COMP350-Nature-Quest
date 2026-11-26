@@ -8,11 +8,13 @@ import android.media.ExifInterface
 import android.webkit.MimeTypeMap
 import kotlinx.coroutines.NonCancellable
 import com.google.firebase.FirebaseApp
-import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.MetadataChanges
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
 import com.google.firebase.storage.StorageMetadata
@@ -31,70 +33,16 @@ class ObservationRepository(context: Context) {
     private val db: FirebaseFirestore by lazy { FirebaseFirestore.getInstance() }
     private val storage: FirebaseStorage by lazy { FirebaseStorage.getInstance() }
 
-    companion object {
-        private val localPosts = mutableListOf<ObservationPost>()
-        private val feedListeners = mutableListOf<() -> Unit>()
+    suspend fun isLiked(postId: String, uid: String): Boolean =
+        db.collection("observations").document(postId).collection("likes").document(uid)
+            .get(com.google.firebase.firestore.Source.SERVER).await().exists()
 
-        fun addLocalPost(post: ObservationPost) {
-            synchronized(localPosts) {
-                localPosts.removeAll { it.id == post.id }
-                localPosts.add(0, post)
-            }
-            feedListeners.toList().forEach { it.invoke() }
-        }
-
-        fun getLocalPosts(): List<ObservationPost> {
-            return synchronized(localPosts) { localPosts.toList() }
-        }
-    }
-
-    // load the currently signed-in user's liked posts.
-    suspend fun getLikedPosts(): List<ObservationPost> {
-        val userId = ensureSignedIn()
-        val observations = db.collection("observations").get().await()
-        val likedPosts = mutableListOf<ObservationPost>()
-
-        for (document in observations.documents) {
-            val like = document.reference
-                .collection("likes")
-                .document(userId)
-                .get()
-                .await()
-
-            if (!like.exists()) continue
-
-            val authorId = document.getString("authorId") ?: continue
-            val title = document.getString("title") ?: continue
-            val latitude = document.getDouble("latitude")
-            val longitude = document.getDouble("longitude")
-
-            likedPosts.add(
-                ObservationPost(
-                    id = document.id,
-                    authorId = authorId,
-                    title = title,
-                    description = document.getString("description").orEmpty(),
-                    organism = document.getString("organism").orEmpty(),
-                    storagePath = document.getString("storagePath").orEmpty(),
-                    createdAt = document.getTimestamp("createdAt"),
-                    latitude = latitude,
-                    longitude = longitude,
-                    isMapPin = document.getBoolean("isMapPin")
-                        ?: (latitude != null && longitude != null)
-                )
-            )
-        }
-
-        return likedPosts.sortedByDescending {
-            it.createdAt?.seconds ?: 0L
-        }
-    }
     suspend fun ensureSignedIn(): String {
         check(FirebaseApp.initializeApp(appContext) != null) {
             "Firebase is not configured. Add the matching google-services.json to app/."
         }
         return auth.currentUser?.uid ?: auth.signInAnonymously().await().user?.uid
-            ?: error("Anonymous Firebase Authentication is not enabled.")
+        ?: error("Anonymous Firebase Authentication is not enabled.")
     }
 
     suspend fun deletePost(post: ObservationPost) {
@@ -116,11 +64,6 @@ class ObservationRepository(context: Context) {
                 }
                 Unit
             }.await()
-
-            val removed = synchronized(localPosts) {
-                localPosts.removeAll { it.id == post.id }
-            }
-            if (removed) feedListeners.toList().forEach { it.invoke() }
         }
     }
     /** Publish a custom Map Pin observation. */
@@ -134,40 +77,20 @@ class ObservationRepository(context: Context) {
         val cleanTitle = title.trim().ifBlank { "Map Pin Observation" }
         val cleanDescription = description.trim()
         require(organism.isEmpty() || organism in ORGANISM_CATEGORIES) { "Choose a supported category." }
-        val uid = try { ensureSignedIn() } catch (_: Exception) { "user_${UUID.randomUUID().toString().take(8)}" }
+        val uid = ensureSignedIn()
         val postId = UUID.randomUUID().toString()
-
-        val post = ObservationPost(
-            id = postId,
-            authorId = uid,
-            title = cleanTitle,
-            description = cleanDescription,
-            organism = organism,
-            storagePath = "",
-            createdAt = Timestamp.now(),
-            latitude = latitude,
-            longitude = longitude,
-            isMapPin = true
+        val record = mapOf(
+            "authorId" to uid,
+            "title" to cleanTitle,
+            "description" to cleanDescription,
+            "organism" to organism,
+            "storagePath" to "",
+            "latitude" to latitude,
+            "longitude" to longitude,
+            "isMapPin" to true,
+            "createdAt" to FieldValue.serverTimestamp()
         )
-
-        addLocalPost(post)
-
-        try {
-            val record = mapOf(
-                "authorId" to uid,
-                "title" to cleanTitle,
-                "description" to cleanDescription,
-                "organism" to organism,
-                "storagePath" to "",
-                "latitude" to latitude,
-                "longitude" to longitude,
-                "isMapPin" to true,
-                "createdAt" to FieldValue.serverTimestamp()
-            )
-            db.collection("observations").document(postId).set(record).await()
-        } catch (_: Exception) {
-            // Firestore write optional if offline
-        }
+        db.collection("observations").document(postId).set(record).await()
         return postId
     }
 
@@ -331,17 +254,6 @@ class ObservationRepository(context: Context) {
                 )
             }.await()
 
-// Update the local pin too, so it shows the attached photo.
-            getLocalPosts().firstOrNull { it.id == pinId }?.let { pin ->
-                addLocalPost(
-                    pin.copy(
-                        title = cleanTitle,
-                        description = cleanDescription,
-                        storagePath = storagePath
-                    )
-                )
-            }
-
             return pinId
         } catch (error: Exception) {
             // Avoid leaving an unreferenced picture if the Firestore write fails.
@@ -356,79 +268,106 @@ class ObservationRepository(context: Context) {
     fun observeFeed(
         onUpdate: (List<ObservationPost>) -> Unit,
         onError: (Exception) -> Unit,
-        organisms: List<String> = emptyList()
+        organisms: List<String> = emptyList(),
+        allPosts: Boolean = false,
+        ownPostsOnly: Boolean = false,
+        authorId: String? = null
     ): ListenerRegistration {
+        val uid = checkNotNull(auth.currentUser?.uid)
         val selected = normalizeOrganisms(organisms)
-        var lastRemotePosts = emptyList<ObservationPost>()
-        var hasRemoteSnapshot = false
-
-        fun emitCombined() {
-            val local = getLocalPosts()
-            val combined = (local + lastRemotePosts)
-                .filter { selected.isEmpty() || it.organism in selected }
-                .distinctBy { it.id }
-                .sortedByDescending { it.createdAt?.seconds ?: Long.MAX_VALUE }
-            if (hasRemoteSnapshot || combined.isNotEmpty()) onUpdate(combined)
-        }
-
-        val listener = {
-            emitCombined()
-        }
-        synchronized(localPosts) {
-            feedListeners.add(listener)
-        }
-
-        emitCombined()
-
-        val firestoreRegistration = try {
-            val collection = db.collection("observations")
-            val query: Query = if (selected.isEmpty()) {
-                collection.orderBy("createdAt", Query.Direction.DESCENDING).limit(40)
-            } else {
-                // One server query for all selected categories. Sort the results
-                // locally to avoid requiring a new composite index.
-                collection.whereIn("organism", selected)
-            }
-            query.addSnapshotListener { snapshot, error ->
-                if (error != null) {
-                    onError(error)
-                } else if (snapshot != null) {
-                    hasRemoteSnapshot = true
-                    lastRemotePosts = snapshot.documents.mapNotNull { document ->
-                        val author = document.getString("authorId") ?: return@mapNotNull null
-                        val title = document.getString("title") ?: return@mapNotNull null
-                        val lat = document.getDouble("latitude")
-                        val lng = document.getDouble("longitude")
-                        val isPin = document.getBoolean("isMapPin") ?: (lat != null && lng != null)
-                        ObservationPost(
-                            id = document.id,
-                            authorId = author,
-                            title = title,
-                            description = document.getString("description").orEmpty(),
-                            organism = document.getString("organism").orEmpty(),
-                            storagePath = document.getString("storagePath").orEmpty(),
-                            createdAt = document.getTimestamp("createdAt"),
-                            latitude = lat,
-                            longitude = lng,
-                            isMapPin = isPin
-                        )
+        val requestedAuthor = if (ownPostsOnly) uid else authorId
+        if (requestedAuthor != null) {
+            return db.collection("observations").whereEqualTo("authorId", requestedAuthor)
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, failure ->
+                    if (failure != null) {
+                        onError(failure)
+                    } else if (snapshot != null && !snapshot.metadata.isFromCache) {
+                        onUpdate(snapshot.documents.mapNotNull { it.toObservation(requestedAuthor) }
+                            .filter { selected.isEmpty() || it.organism in selected }
+                            .sortedByDescending { it.createdAt })
                     }
-                    emitCombined()
                 }
-            }
-        } catch (failure: Exception) {
-            onError(failure)
-            null
         }
 
-        return object : ListenerRegistration {
-            override fun remove() {
-                firestoreRegistration?.remove()
-                synchronized(localPosts) {
-                    feedListeners.remove(listener)
+        val social = com.example.useraccount.SocialRepository(uid)
+        val rows = mutableMapOf<String, List<ObservationPost>>()
+        val subscriptions = mutableMapOf<String, ListenerRegistration>()
+        var authors: Set<String>? = null
+        var blocked: Set<String>? = null
+        var blockedBy: Set<String>? = null
+        var closed = false
+
+        fun emit() {
+            val ordered = rows.values.flatten()
+                .filter { selected.isEmpty() || it.organism in selected }
+                .sortedByDescending { it.createdAt }
+            onUpdate(if (selected.isEmpty() && !allPosts) ordered.take(40) else ordered)
+        }
+
+        fun reconcile() {
+            if (closed) return
+            val allowed = if (authors == null || blocked == null || blockedBy == null) emptySet()
+            else (authors.orEmpty() + uid) - blocked.orEmpty() - blockedBy.orEmpty()
+            for (author in subscriptions.keys.toSet() - allowed) {
+                subscriptions.remove(author)?.remove()
+                rows.remove(author)
+            }
+            emit()
+            for (author in allowed - subscriptions.keys) {
+                val query = db.collection("observations").whereEqualTo("authorId", author)
+                subscriptions[author] = query.addSnapshotListener(MetadataChanges.INCLUDE) { snap, failure ->
+                    if (closed || author !in subscriptions) return@addSnapshotListener
+                    if (failure != null) {
+                        rows.remove(author)
+                        emit()
+                        if (failure.code != FirebaseFirestoreException.Code.PERMISSION_DENIED) onError(failure)
+                    } else if (snap != null && !snap.metadata.isFromCache) {
+                        rows[author] = snap.documents.mapNotNull { it.toObservation(author) }
+                        emit()
+                    }
                 }
             }
         }
+
+        fun track(query: Query, field: String?, assign: (Set<String>?) -> Unit): ListenerRegistration =
+            query.addSnapshotListener(MetadataChanges.INCLUDE) { snap, failure ->
+                if (closed) return@addSnapshotListener
+                if (failure != null) {
+                    assign(null)
+                    reconcile()
+                    onError(failure)
+                } else if (snap != null && !snap.metadata.isFromCache) {
+                    assign(snap.documents.mapNotNull { if (field == null) it.id else it.getString(field) }.toSet())
+                    reconcile()
+                }
+            }
+
+        val controls = listOf(track(social.people, null) { authors = it },
+            track(social.edges(uid, "blocks"), null) { blocked = it },
+            track(social.incoming("blocks"), "source") { blockedBy = it })
+        return ListenerRegistration {
+            closed = true
+            controls.forEach { it.remove() }
+            subscriptions.values.forEach { it.remove() }
+        }
+    }
+
+    private fun DocumentSnapshot.toObservation(author: String): ObservationPost? {
+        val title = getString("title") ?: return null
+        val latitude = getDouble("latitude")
+        val longitude = getDouble("longitude")
+        return ObservationPost(
+            id = id,
+            authorId = author,
+            title = title,
+            description = getString("description").orEmpty(),
+            storagePath = getString("storagePath").orEmpty(),
+            createdAt = getTimestamp("createdAt"),
+            latitude = latitude,
+            longitude = longitude,
+            isMapPin = getBoolean("isMapPin") ?: (latitude != null && longitude != null),
+            organism = getString("organism").orEmpty()
+        )
     }
 
     /** Storage SDK enforces authenticated reads; temp files are deleted after decoding. */
@@ -437,7 +376,26 @@ class ObservationRepository(context: Context) {
         if (storagePath.isBlank()) return@withContext null
         val temp = File.createTempFile("observation_", ".img", appContext.cacheDir)
         try {
-            storage.reference.child(storagePath).getFile(temp).await()
+            if (storagePath.startsWith("observation_photos/")) {
+                val project = checkNotNull(FirebaseApp.getInstance().options.projectId)
+                val token = checkNotNull(auth.currentUser?.getIdToken(false)?.await()?.token)
+                val endpoint = Uri.Builder().scheme("https")
+                    .authority("us-central1-${project}.cloudfunctions.net")
+                    .appendPath("readObservationPhoto").appendQueryParameter("path", storagePath).build()
+                val connection = java.net.URL(endpoint.toString()).openConnection() as javax.net.ssl.HttpsURLConnection
+                try {
+                    connection.setRequestProperty("Authorization", "Bearer $token")
+                    connection.instanceFollowRedirects = false
+                    connection.connectTimeout = 15000
+                    connection.readTimeout = 30000
+                    check(connection.responseCode == 200)
+                    connection.inputStream.use { input -> temp.outputStream().use { input.copyTo(it) } }
+                } finally {
+                    connection.disconnect()
+                }
+            } else {
+                storage.reference.child(storagePath).getFile(temp).await()
+            }
             val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeFile(temp.absolutePath, bounds)
             var sample = 1

@@ -27,7 +27,8 @@ import kotlin.math.min
 /** Contains only fields that other signed-in app users may see. */
 data class PublicProfile(
     val username: String = "Nature explorer",
-    val photoPath: String = ""
+    val photoPath: String = "",
+    val bio: String = ""
 )
 
 class PublicProfileRepository {

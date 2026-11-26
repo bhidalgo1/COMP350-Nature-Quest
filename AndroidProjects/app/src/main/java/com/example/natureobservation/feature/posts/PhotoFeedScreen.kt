@@ -48,7 +48,11 @@ import java.util.Locale
 @Composable
 fun PhotoFeedScreen(
     focusPostId: String? = null,
-    organismFilters: List<String> = emptyList()
+    organismFilters: List<String> = emptyList(),
+    ownPostsOnly: Boolean = false,
+    authorId: String? = null,
+    showPosts: Boolean = true,
+    profileHeader: (@Composable () -> Unit)? = null
 ) {
     val context = LocalContext.current
     val repository = remember(context) { ObservationRepository(context) }
@@ -56,7 +60,9 @@ fun PhotoFeedScreen(
     val posts = remember { mutableStateListOf<ObservationPost>() }
     val listState = rememberLazyListState()
     var focusedPostId by remember { mutableStateOf<String?>(null) }
-    val focusIndex = posts.indexOfFirst { it.id == focusPostId }
+    val focusIndex = posts.indexOfFirst { it.id == focusPostId }.let { index ->
+        if (index >= 0 && profileHeader != null) index + 1 else index
+    }
 
     LaunchedEffect(focusPostId, focusIndex) {
         if (focusPostId != null && focusIndex >= 0 && focusedPostId != focusPostId) {
@@ -67,16 +73,19 @@ fun PhotoFeedScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
 
-    DisposableEffect(repository, organismFilters) {
+    DisposableEffect(repository, organismFilters, ownPostsOnly, authorId, showPosts) {
         loading = true
         error = null
         posts.clear()
         var registration: ListenerRegistration? = null
+        if (!showPosts) return@DisposableEffect onDispose {}
         val job = scope.launch {
             try {
-                repository.ensureSignedIn()
+                if (!ownPostsOnly && authorId == null) repository.ensureSignedIn()
                 registration = repository.observeFeed(
                     organisms = organismFilters,
+                    ownPostsOnly = ownPostsOnly,
+                    authorId = authorId,
                     onUpdate = { items ->
                         posts.clear()
                         posts.addAll(items)
@@ -84,6 +93,7 @@ fun PhotoFeedScreen(
                         loading = false
                     },
                     onError = { failure ->
+                        if (authorId != null || ownPostsOnly) posts.clear()
                         error = failure.localizedMessage ?: "Could not load observations."
                         loading = false
                     }
@@ -98,9 +108,14 @@ fun PhotoFeedScreen(
         onDispose { job.cancel(); registration?.remove() }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    val feedHeading: @Composable () -> Unit = {
         Text(
-            if (organismFilters.isEmpty()) "Nature Observations" else "Filtered observations",
+            when {
+                ownPostsOnly -> "My posts"
+                authorId != null -> "Posts"
+                organismFilters.isEmpty() -> "Nature Observations"
+                else -> "Filtered observations"
+            },
             style = MaterialTheme.typography.headlineSmall
         )
         if (organismFilters.isNotEmpty()) {
@@ -109,13 +124,33 @@ fun PhotoFeedScreen(
         if (loading) Text("Loading posts...")
         error?.let { Text("Feed error: $it", color = MaterialTheme.colorScheme.error) }
         if (!loading && posts.isEmpty() && error == null) {
-            Text(if (organismFilters.isEmpty()) "No observations posted yet." else "No posts match these categories yet.")
+            Text(when {
+                ownPostsOnly -> "You haven’t posted any observations yet."
+                authorId != null -> "No posts yet."
+                organismFilters.isEmpty() -> "No observations posted yet."
+                else -> "No posts match these categories yet."
+            })
         }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize()
+            .then(if (profileHeader == null) Modifier.padding(16.dp) else Modifier)
+    ) {
+        if (profileHeader == null && showPosts) feedHeading()
         LazyColumn(
             state = listState,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            items(items = posts, key = { it.id }) { post ->
+            if (profileHeader != null) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        profileHeader()
+                        if (showPosts) Column { feedHeading() }
+                    }
+                }
+            }
+            items(items = if (showPosts) posts else emptyList(), key = { it.id }) { post ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(12.dp),
@@ -133,9 +168,6 @@ fun PhotoFeedScreen(
                                     ) {
                                         val intent = Intent(context, MapActivity::class.java)
                                             .putExtra("pin_id", post.id)
-                                            .putExtra("pin_title", post.title)
-                                            .putExtra("pin_description", post.description)
-                                            .putExtra("pin_author", post.authorId)
                                         if (post.latitude != null && post.longitude != null) {
                                             MapActivity.putLocation(
                                                 intent,
